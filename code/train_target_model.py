@@ -24,6 +24,7 @@ try:
     from .finetuning_callbacks import AnyFinetuning
     from .tasks import DMSTask
     from . import analysis_utils as an
+    from train_source_model import get_checkpoint_path
 except ImportError:
     import models
     import training_utils
@@ -33,6 +34,7 @@ except ImportError:
     from finetuning_callbacks import AnyFinetuning
     from tasks import DMSTask
     import analysis_utils as an
+
 
 logging.basicConfig(level=logging.INFO)
 
@@ -296,7 +298,7 @@ def main(args: argparse.Namespace):
                                                         accelerator=accelerator,
                                                         devices=devices)
 
-    trainer.fit(task, datamodule=dm)
+    trainer.fit(task, datamodule=dm, ckpt_path=get_checkpoint_path(log_dir))
 
     # assuming there is a checkpoint callback (all target models should have this)
     ckpt_callback: Optional[ModelCheckpoint] = trainer.checkpoint_callback
