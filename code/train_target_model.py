@@ -15,6 +15,8 @@ from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint, TQDMProg
     LearningRateMonitor, Checkpoint, StochasticWeightAveraging, ModelSummary, RichProgressBar, RichModelSummary
 import numpy as np
 
+from train_source_model import get_checkpoint_path
+
 import models
 import training_utils
 import utils
@@ -286,7 +288,7 @@ def main(args: argparse.Namespace):
                                                         accelerator=accelerator,
                                                         devices=devices)
 
-    trainer.fit(task, datamodule=dm)
+    trainer.fit(task, datamodule=dm, ckpt_path=get_checkpoint_path(log_dir))
 
     # assuming there is a checkpoint callback (all target models should have this)
     ckpt_callback: Optional[ModelCheckpoint] = trainer.checkpoint_callback
