@@ -750,6 +750,7 @@ class RosettaDataModule(pl.LightningDataModule):
                  # whether to use datasets.pad_sequences_collate_fn for dataloaders (for when enable_pdb_sampler=False)
                  # supports the global CNN model, which supports multiple PDBs in a single batch
                  use_padding_collate_fn: bool = False,
+                 num_workers=4,
                  *args, **kwargs):
 
         super().__init__()
@@ -781,6 +782,8 @@ class RosettaDataModule(pl.LightningDataModule):
 
         # number of tokens needed in model gen code to set up the embedding layer
         self.num_tokens = constants.NUM_CHARS
+
+        self.num_workers = num_workers
 
         # load PDB fn for each example, used for PDBSampler dataloader
         pdb_fns_path = join(dirname(self.ds_fn), "pdb_fns.txt")
@@ -949,15 +952,15 @@ class RosettaDataModule(pl.LightningDataModule):
 
     def train_dataloader(self):
         return self.get_dataloader(self.train_name, self.train_ds, shuffle=True,
-                                   use_distributed_sampler=self.enable_distributed_sampler, num_workers=4)
+                                   use_distributed_sampler=self.enable_distributed_sampler, num_workers=self.num_workers)
 
     def val_dataloader(self):
         return self.get_dataloader(self.val_name, self.val_ds, shuffle=False,
-                                   use_distributed_sampler=self.enable_distributed_sampler, num_workers=4)
+                                   use_distributed_sampler=self.enable_distributed_sampler, num_workers=self.num_workers)
 
     def test_dataloader(self):
         return self.get_dataloader(self.test_name, self.test_ds, shuffle=False,
-                                   use_distributed_sampler=False, num_workers=4)
+                                   use_distributed_sampler=False, num_workers=self.num_workers)
 
 
 class BasicRosettaDataModule(pl.LightningDataModule):

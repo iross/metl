@@ -35,7 +35,6 @@ except ImportError:
     from tasks import DMSTask
     import analysis_utils as an
 
-
 logging.basicConfig(level=logging.INFO)
 
 # this warning pops up due to the way the data is fed in with a single PDB file for the entire batch.

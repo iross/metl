@@ -219,7 +219,8 @@ def main(args):
                            batch_size=args.batch_size,
                            enable_distributed_sampler=True if strategy == "ddp" else False,
                            enable_pdb_sampler=True,
-                           use_padding_collate_fn=False)
+                           use_padding_collate_fn=False,
+                           num_workers=args.num_cpus)
 
     # set up the RosettaTask
     # pass in arguments from the datamodule that are important for model construction
@@ -366,6 +367,10 @@ if __name__ == "__main__":
                         help="github tag for current run",
                         type=str,
                         default="no_github_tag")
+    parser.add_argument("--num_cpus",
+                        help="Number of CPUs requested when launching jobs on HTCondor",
+                        type=int,
+                        default=4)
 
     # additional args
     parser.add_argument("--log_dir_base",
