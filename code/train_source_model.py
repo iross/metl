@@ -262,16 +262,14 @@ def main(args):
         save_top_k=5,
         mode="min",
         auto_insert_metric_name=True,
-        #every_n_epochs=1
-        train_time_interval=timedelta(hours=1)
+        every_n_epochs=1
     )
     callbacks.append(checkpoint_callback)
 
-    # checkpoints at regular intervals (every 1 epoch)
+    # checkpoints at regular intervals (every 1 hour)
     checkpoint_callback_2 = ModelCheckpoint(
-        dirpath=join(log_dir, "checkpoints", "interval_checkpoints"),
-        every_n_epochs=1,
-        save_top_k=-1
+        dirpath=join(log_dir, "checkpoints", "time_checkpoints"),
+        train_time_interval=timedelta(hours=1)
     )
     callbacks.append(checkpoint_callback_2)
 
