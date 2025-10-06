@@ -317,7 +317,10 @@ def main(args):
                                  strategy=None,
                                  logger=loggers,
                                  default_root_dir=log_dir)
-            model = tasks.RosettaTask.load_from_checkpoint(checkpoint_callback.best_model_path)
+            try:
+                model = tasks.RosettaTask.load_from_checkpoint(checkpoint_callback.best_model_path)
+            except:
+                model = tasks.RosettaTask.load_from_checkpoint(ckpt_path)
             test_metrics = trainer.test(model, datamodule=dm)
 
     else:
