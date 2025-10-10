@@ -325,7 +325,11 @@ def main(args):
             test_metrics = trainer.test(model, datamodule=dm)
 
     else:
-        test_metrics = trainer.test(ckpt_path="best", datamodule=dm)
+        try:
+            test_metrics = trainer.test(ckpt_path="best", datamodule=dm)
+        except:
+            print(f"Couldn't find best model path. Trying to load from {ckpt_path} instead.")
+            test_metrics = trainer.test(ckpt_path=ckpt_path, datamodule=dm)
 
     if trainer.is_global_zero:
         # save metrics and losses (*at the best epoch*) to csv
