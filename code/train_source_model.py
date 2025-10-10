@@ -320,6 +320,7 @@ def main(args):
             try:
                 model = tasks.RosettaTask.load_from_checkpoint(checkpoint_callback.best_model_path)
             except:
+                print(f"Couldn't find {checkpoint_callback.best_model_path}. Trying to load from {ckpt_path} instead.")
                 model = tasks.RosettaTask.load_from_checkpoint(ckpt_path)
             test_metrics = trainer.test(model, datamodule=dm)
 
