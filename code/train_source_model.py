@@ -93,13 +93,42 @@ def create_log_dir_version(log_dir):
 
 
 def get_checkpoint_path(log_dir):
-    if isfile(join(log_dir, "checkpoints", "last.ckpt")):
-        ckpt_path = join(log_dir, "checkpoints", "last.ckpt")
-        print("Found checkpoint, resuming training from: {}".format(ckpt_path))
-    else:
-        ckpt_path = None
-        print("No checkpoint found, training from scratch")
-    return ckpt_path
+    import glob
+    import re
+
+    checkpoint_dir = join(log_dir, "checkpoints")
+
+    # Look for versioned last-v*.ckpt files first
+    pattern = join(checkpoint_dir, "last-v*.ckpt")
+    versioned_ckpts = glob.glob(pattern)
+
+    if versioned_ckpts:
+        # Extract version numbers and find the highest
+        version_pattern = re.compile(r'last-v(\d+)\.ckpt')
+        max_version = -1
+        max_ckpt = None
+
+        for ckpt in versioned_ckpts:
+            match = version_pattern.search(os.path.basename(ckpt))
+            if match:
+                version = int(match.group(1))
+                if version > max_version:
+                    max_version = version
+                    max_ckpt = ckpt
+
+        if max_ckpt:
+            print("Found checkpoint, resuming training from: {}".format(max_ckpt))
+            return max_ckpt
+
+    # Fall back to last.ckpt
+    last_ckpt = join(checkpoint_dir, "last.ckpt")
+    if isfile(last_ckpt):
+        print("Found checkpoint, resuming training from: {}".format(last_ckpt))
+        return last_ckpt
+
+    # No checkpoint found
+    print("No checkpoint found, training from scratch")
+    return None
 
 
 def init_loggers(log_dir: str,
