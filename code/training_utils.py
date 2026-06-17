@@ -1,54 +1,64 @@
-""" shared utilities for training source and target models """
+"""shared utilities for training source and target models"""
 
 import os
 import warnings
 from argparse import ArgumentParser
 from functools import partial
-from os.path import join, isdir, basename
-from typing import Iterator, Dict, Union
+from os.path import basename, isdir, join
+from typing import Dict, Iterator, Union
 
+import lightning.pytorch as pl
 import numpy as np
 import pandas as pd
-import torch
 import seaborn as sns
+import torch
 import wandb
+from lightning.pytorch import Callback
+from lightning.pytorch.callbacks import (
+    BasePredictionWriter,
+    EarlyStopping,
+    ModelCheckpoint,
+)
+from lightning.pytorch.loggers import CSVLogger, TensorBoardLogger, WandbLogger
 from matplotlib import pyplot as plt
 from matplotlib.offsetbox import AnchoredText
 from matplotlib.ticker import MaxNLocator
-import pytorch_lightning as pl
-from pytorch_lightning import Callback
-from pytorch_lightning.callbacks import BasePredictionWriter, EarlyStopping, ModelCheckpoint
-from pytorch_lightning.loggers import TensorBoardLogger, WandbLogger, CSVLogger
 from scipy.stats import pearsonr, spearmanr
-from torch import optim, Tensor
+from torch import Tensor, optim
 from torch.optim.lr_scheduler import LambdaLR
 
 try:
-    from . import utils
-    from . import datamodules
+    from . import datamodules, utils
     from .metrics import compute_metrics
 except ImportError:
-    import utils
     import datamodules
+    import utils
     from metrics import compute_metrics
 
 
 def save_scatterplots(dm, predictions_d, log_dir, suffix=""):
-
     # unable to save scatterplots for sets if predictions_d only contains predictions for full dataset
     if len(predictions_d) == 1 and "full" in predictions_d:
-        warnings.warn("Unable to save scatterplots for sets because predictions_d "
-                      "only contains predictions for full dataset")
+        warnings.warn(
+            "Unable to save scatterplots for sets because predictions_d "
+            "only contains predictions for full dataset"
+        )
         return
 
     # save a scatter plot
     def _ss_helper(sn, preds):
         targets = dm.get_targets(sn, squeeze=True)
         if len(targets) != len(preds):
-            print("Length of {} targets {} does not equal length of predictions {}. "
-                  "Are you using limit_predict_batches?".format(sn, len(targets), len(preds)))
-        print("saving a scatter plot for set: {} ({} variants)".format(sn, len(targets)))
-        plot_scatter(targets[:len(preds)], preds, sn, log_dir, fn_suffix=suffix)
+            print(
+                "Length of {} targets {} does not equal length of predictions {}. "
+                "Are you using limit_predict_batches?".format(
+                    sn, len(targets), len(preds)
+                )
+            )
+        print(
+            "saving a scatter plot for set: {} ({} variants)".format(sn, len(targets))
+        )
+        plot_scatter(targets[: len(preds)], preds, sn, log_dir, fn_suffix=suffix)
 
     for set_name, predictions in predictions_d.items():
         if predictions is None:
@@ -60,7 +70,6 @@ def save_scatterplots(dm, predictions_d, log_dir, suffix=""):
 
 
 def plot_scatter(true_scores, predicted_scores, set_name, log_dir, fn_suffix=""):
-
     kwargs = {"s": 8, "marker": "o", "alpha": 0.5, "edgecolor": "black", "lw": 0.1}
     ax = sns.scatterplot(x=true_scores, y=predicted_scores, **kwargs)
     fig = ax.get_figure()
@@ -84,11 +93,15 @@ def plot_scatter(true_scores, predicted_scores, set_name, log_dir, fn_suffix="")
         r = pearsonr(true_scores, predicted_scores)[0]
         p = spearmanr(true_scores, predicted_scores)[0]
     except ValueError as e:
-        print("Unable to compute metrics while plotting scatterplots, probably because NaNs are present")
+        print(
+            "Unable to compute metrics while plotting scatterplots, probably because NaNs are present"
+        )
         r = np.nan
         p = np.nan
 
-    anchored_text_string = "Set: {}\nPearson: {:.3f}\nSpearman: {:.3f}".format(set_name, r, p)
+    anchored_text_string = "Set: {}\nPearson: {:.3f}\nSpearman: {:.3f}".format(
+        set_name, r, p
+    )
     anchored_text = AnchoredText(anchored_text_string, loc="upper left", frameon=False)
     ax.add_artist(anchored_text)
 
@@ -101,11 +114,12 @@ def plot_scatter(true_scores, predicted_scores, set_name, log_dir, fn_suffix="")
 
 
 def save_metrics_custom(dm, predictions_d, log_dir, save_fn=None, suffix=""):
-
     # unable to save custom metrics for sets if predictions_d only contains predictions for full dataset
     if len(predictions_d) == 1 and "full" in predictions_d:
-        warnings.warn("Unable to save custom metrics for sets because predictions_d "
-                      "only contains predictions for full dataset")
+        warnings.warn(
+            "Unable to save custom metrics for sets because predictions_d "
+            "only contains predictions for full dataset"
+        )
         return None
 
     evaluations = {}
@@ -121,9 +135,13 @@ def save_metrics_custom(dm, predictions_d, log_dir, save_fn=None, suffix=""):
         # if we are running limit batches, then the length of predictions won't match the length of targets
         # this ensures we grab the same number of targets for however many batches were actually run
         if len(targets) != len(predictions):
-            print("Length of {} targets {} does not equal length of predictions {}. "
-                  "Are you using limit_predict_batches?".format(set_name, len(targets), len(predictions)))
-        targets = targets[:len(predictions)]
+            print(
+                "Length of {} targets {} does not equal length of predictions {}. "
+                "Are you using limit_predict_batches?".format(
+                    set_name, len(targets), len(predictions)
+                )
+            )
+        targets = targets[: len(predictions)]
         metrics = compute_metrics(targets, predictions)
         evaluations[set_name] = metrics
 
@@ -132,7 +150,11 @@ def save_metrics_custom(dm, predictions_d, log_dir, save_fn=None, suffix=""):
     metrics_df = pd.DataFrame(evaluations).transpose()
     metrics_df.index.rename("set", inplace=True)
     metrics_df = metrics_df.sort_index(
-        key=lambda sets: [sorted_order.index(s) if s in sorted_order else len(sorted_order) for s in sets])
+        key=lambda sets: [
+            sorted_order.index(s) if s in sorted_order else len(sorted_order)
+            for s in sets
+        ]
+    )
 
     print(metrics_df)
 
@@ -143,12 +165,13 @@ def save_metrics_custom(dm, predictions_d, log_dir, save_fn=None, suffix=""):
     return metrics_df
 
 
-def save_predictions(raw_preds: Union[list[torch.Tensor], list[list[torch.Tensor]]],
-                     dm: datamodules.DMSDataModule,
-                     log_dir: str,
-                     save_format: Union[str, tuple[str]] = ("txt", "npy"),
-                     suffix: str = ""):
-
+def save_predictions(
+    raw_preds: Union[list[torch.Tensor], list[list[torch.Tensor]]],
+    dm: datamodules.DMSDataModule,
+    log_dir: str,
+    save_format: Union[str, tuple[str]] = ("txt", "npy"),
+    suffix: str = "",
+):
     if isinstance(save_format, str):
         save_format = [save_format]
 
@@ -159,7 +182,12 @@ def save_predictions(raw_preds: Union[list[torch.Tensor], list[list[torch.Tensor
     def _save_predictions_helper(hrp, hsn):
         np_preds = torch.cat(hrp, dim=0).cpu().numpy().squeeze()
         if "txt" in save_format:
-            np.savetxt(join(predictions_dir, f"{hsn}_predictions{suffix}.txt"), np_preds, fmt="%1.7f", delimiter=",")
+            np.savetxt(
+                join(predictions_dir, f"{hsn}_predictions{suffix}.txt"),
+                np_preds,
+                fmt="%1.7f",
+                delimiter=",",
+            )
         if "npy" in save_format:
             np.save(join(predictions_dir, f"{hsn}_predictions{suffix}.npy"), np_preds)
         return np_preds
@@ -189,8 +217,12 @@ def save_predictions(raw_preds: Union[list[torch.Tensor], list[list[torch.Tensor
         # if we are using limit_predict_batches, then we will not have predictions for the full dataset
         # this will cause problems for the next step where we want to save predictions for each set
         if len(predictions_d["full"]) != len(dm.ds):
-            warnings.warn("Length of predictions for 'full' dataset ({}) does not match length of datamodule ({}). "
-                          "Are you using limit_predict_batches?".format(len(predictions_d["full"]), len(dm.ds)))
+            warnings.warn(
+                "Length of predictions for 'full' dataset ({}) does not match length of datamodule ({}). "
+                "Are you using limit_predict_batches?".format(
+                    len(predictions_d["full"]), len(dm.ds)
+                )
+            )
         else:
             # note we want to go by the datamodule standard set names, not the user-defined
             # names that might be in dm.split_idxs. this is to match past behavior, where we
@@ -207,11 +239,13 @@ def save_predictions(raw_preds: Union[list[torch.Tensor], list[list[torch.Tensor
 
 
 class PredictionWriter(BasePredictionWriter):
-    def __init__(self,
-                 output_dir: str,
-                 save_fn_base: str = "predictions",
-                 batch_write_mode: str = "combined_csv",
-                 write_interval: str = "batch_and_epoch"):
+    def __init__(
+        self,
+        output_dir: str,
+        save_fn_base: str = "predictions",
+        batch_write_mode: str = "combined_csv",
+        write_interval: str = "batch_and_epoch",
+    ):
         super().__init__(write_interval)
 
         self.output_dir = output_dir
@@ -231,19 +265,37 @@ class PredictionWriter(BasePredictionWriter):
         self.batch_mode = batch_write_mode.split("_")[0]  # separate or combined
         self.batch_format = batch_write_mode.split("_")[1]  # csv or npy
 
-    def write_on_batch_end(self, trainer, pl_module, prediction, batch_indices, batch, batch_idx, dataloader_idx):
+    def write_on_batch_end(
+        self,
+        trainer,
+        pl_module,
+        prediction,
+        batch_indices,
+        batch,
+        batch_idx,
+        dataloader_idx,
+    ):
         if self.batch_mode == "separate" and self.batch_format == "csv":
-            np.savetxt(os.path.join(self.output_dir, f"{batch_idx}.csv"),
-                       prediction.cpu().numpy(), fmt="%.7f", delimiter=",")
+            np.savetxt(
+                os.path.join(self.output_dir, f"{batch_idx}.csv"),
+                prediction.cpu().numpy(),
+                fmt="%.7f",
+                delimiter=",",
+            )
         elif self.batch_mode == "separate" and self.batch_format == "npy":
-            np.save(os.path.join(self.output_dir, f"{batch_idx}.npy"), prediction.cpu().numpy())
+            np.save(
+                os.path.join(self.output_dir, f"{batch_idx}.npy"),
+                prediction.cpu().numpy(),
+            )
         elif self.batch_mode == "combined":
             # append to a combined file
             save_fn = os.path.join(self.output_dir, f"{self.save_fn_base}.csv")
             with open(save_fn, "a") as f:
                 np.savetxt(f, prediction.cpu().numpy(), fmt="%.7f", delimiter=",")
         else:
-            raise ValueError("Unknown batch_mode or batch_format combination. This shouldn't happen.")
+            raise ValueError(
+                "Unknown batch_mode or batch_format combination. This shouldn't happen."
+            )
 
     def write_on_epoch_end(self, trainer, pl_module, predictions, batch_indices):
         # Use predictions[0] because first layer of lists is dataloaders
@@ -255,7 +307,9 @@ class PredictionWriter(BasePredictionWriter):
 class BestMetricLogger(Callback):
     def __init__(self, metric, mode):
         self.metric = metric
-        self.state = {"best": torch.tensor(np.Inf) if mode == "min" else torch.tensor(-np.Inf)}
+        self.state = {
+            "best": torch.tensor(np.Inf) if mode == "min" else torch.tensor(-np.Inf)
+        }
 
     @property
     def state_key(self):
@@ -265,8 +319,13 @@ class BestMetricLogger(Callback):
         current = trainer.callback_metrics.get(self.metric)
         if (current is not None) and (current < self.state["best"]):
             self.state["best"] = current
-            pl_module.log("{}_best".format(self.metric), self.state["best"],
-                          on_epoch=True, sync_dist=True, prog_bar=True)
+            pl_module.log(
+                "{}_best".format(self.metric),
+                self.state["best"],
+                on_epoch=True,
+                sync_dist=True,
+                prog_bar=True,
+            )
 
     def load_state_dict(self, state_dict):
         self.state.update(state_dict)
@@ -275,7 +334,7 @@ class BestMetricLogger(Callback):
         return self.state.copy()
 
 
-class CosineWarmupScheduler(optim.lr_scheduler._LRScheduler):
+class CosineWarmupScheduler(optim.lr_scheduler.LRScheduler):
     # https://pytorch-lightning.readthedocs.io/en/latest/notebooks/course_UvA-DL/05-transformers-and-MH-attention.html
     def __init__(self, optimizer, warmup, max_iters):
         self.warmup = warmup
@@ -293,7 +352,7 @@ class CosineWarmupScheduler(optim.lr_scheduler._LRScheduler):
         return lr_factor
 
 
-class ConstantWarmupScheduler(optim.lr_scheduler._LRScheduler):
+class ConstantWarmupScheduler(optim.lr_scheduler.LRScheduler):
     def __init__(self, optimizer, warmup):
         self.warmup = warmup
         super().__init__(optimizer)
@@ -312,13 +371,23 @@ class ConstantWarmupScheduler(optim.lr_scheduler._LRScheduler):
 
 
 class WarmupCosineLR(LambdaLR):
-    def __init__(self, optimizer, warmup_epochs, max_epochs, final_lr=0, last_epoch=-1, start_epoch=0):
+    def __init__(
+        self,
+        optimizer,
+        warmup_epochs,
+        max_epochs,
+        final_lr=0,
+        last_epoch=-1,
+        start_epoch=0,
+    ):
         self.warmup_epochs = warmup_epochs
         self.max_epochs = max_epochs
         self.final_lr = final_lr
         self.start_epoch = start_epoch
 
-        super(WarmupCosineLR, self).__init__(optimizer, self.lr_lambda, last_epoch=last_epoch)
+        super(WarmupCosineLR, self).__init__(
+            optimizer, self.lr_lambda, last_epoch=last_epoch
+        )
 
     def lr_lambda(self, epoch):
         if epoch < self.start_epoch:
@@ -327,12 +396,18 @@ class WarmupCosineLR(LambdaLR):
             progress = (epoch - self.start_epoch) / (self.warmup_epochs - 1)
             return progress
         else:
-            progress = (epoch - self.start_epoch - self.warmup_epochs) / (self.max_epochs - self.warmup_epochs - self.start_epoch)
-            return self.final_lr + 0.5 * (1 - self.final_lr) * (1 + np.cos(np.pi * progress))
+            progress = (epoch - self.start_epoch - self.warmup_epochs) / (
+                self.max_epochs - self.warmup_epochs - self.start_epoch
+            )
+            return self.final_lr + 0.5 * (1 - self.final_lr) * (
+                1 + np.cos(np.pi * progress)
+            )
 
 
-class DualPhaseConstantWarmupScheduler(optim.lr_scheduler._LRScheduler):
-    def __init__(self, optimizer, num_warmup_steps, phase2_start_step, phase2_lr_ratio=1.0):
+class DualPhaseConstantWarmupScheduler(optim.lr_scheduler.LRScheduler):
+    def __init__(
+        self, optimizer, num_warmup_steps, phase2_start_step, phase2_lr_ratio=1.0
+    ):
         self.num_warmup_steps = num_warmup_steps
         self.phase2_start_step = phase2_start_step
         self.phase2_lr_ratio = phase2_lr_ratio
@@ -348,19 +423,24 @@ class DualPhaseConstantWarmupScheduler(optim.lr_scheduler._LRScheduler):
         elif epoch < self.phase2_start_step:
             return 1.0
         elif epoch < self.phase2_start_step + self.num_warmup_steps:
-            return (float(epoch) - self.phase2_start_step) / self.num_warmup_steps * self.phase2_lr_ratio
+            return (
+                (float(epoch) - self.phase2_start_step)
+                / self.num_warmup_steps
+                * self.phase2_lr_ratio
+            )
         else:
             return self.phase2_lr_ratio
 
 
-class DualPhaseConstantWarmupCosineDecayScheduler(optim.lr_scheduler._LRScheduler):
-    def __init__(self,
-                 optimizer: torch.optim.Optimizer,
-                 total_steps: int,
-                 num_warmup_steps: int,
-                 phase2_start_step: int,
-                 phase2_lr_ratio: float = 1.0):
-
+class DualPhaseConstantWarmupCosineDecayScheduler(optim.lr_scheduler.LRScheduler):
+    def __init__(
+        self,
+        optimizer: torch.optim.Optimizer,
+        total_steps: int,
+        num_warmup_steps: int,
+        phase2_start_step: int,
+        phase2_lr_ratio: float = 1.0,
+    ):
         self.total_steps = total_steps
         self.num_warmup_steps = num_warmup_steps
         self.phase2_start_step = phase2_start_step
@@ -386,9 +466,20 @@ class DualPhaseConstantWarmupCosineDecayScheduler(optim.lr_scheduler._LRSchedule
             lr_factor = 0.5 * (1 + np.cos(np.pi * epoch / self.phase1_total_steps))
             return lr_factor
         elif epoch < self.phase2_start_step + self.num_warmup_steps:
-            return (float(epoch) - self.phase2_start_step) / self.num_warmup_steps * self.phase2_lr_ratio
+            return (
+                (float(epoch) - self.phase2_start_step)
+                / self.num_warmup_steps
+                * self.phase2_lr_ratio
+            )
         else:
-            lr_factor = 0.5 * (1 + np.cos(np.pi * (float(epoch) - self.phase2_start_step) / self.phase2_total_steps))
+            lr_factor = 0.5 * (
+                1
+                + np.cos(
+                    np.pi
+                    * (float(epoch) - self.phase2_start_step)
+                    / self.phase2_total_steps
+                )
+            )
             lr_factor *= self.phase2_lr_ratio
             return lr_factor
 
@@ -417,9 +508,13 @@ def plot_losses(log_dir):
     metrics_df = pd.read_csv(metrics_fn)
 
     # create loss dataframe (with val loss if a val set was used)
-    loss_df = metrics_df[metrics_df["train_loss_epoch"].notnull()][["epoch", "train_loss_epoch"]]
+    loss_df = metrics_df[metrics_df["train_loss_epoch"].notnull()][
+        ["epoch", "train_loss_epoch"]
+    ]
     if "val_loss" in metrics_df:
-        val_loss_df = metrics_df[metrics_df["val_loss"].notnull()][["epoch", "val_loss"]]
+        val_loss_df = metrics_df[metrics_df["val_loss"].notnull()][
+            ["epoch", "val_loss"]
+        ]
         loss_df = pd.merge(loss_df, val_loss_df, on="epoch")
     loss_df = loss_df.set_index("epoch", verify_integrity=True)
 
@@ -447,11 +542,22 @@ def plot_losses_source_model(log_dir):
     metrics_df = pd.read_csv(metrics_fn)
 
     if "val_loss" in metrics_df.columns and "train_loss_epoch" in metrics_df.columns:
-        val_loss_df = metrics_df[metrics_df["val_loss"].notnull()][["epoch", "val_loss"]]
-        train_loss_df = metrics_df[metrics_df["train_loss_epoch"].notnull()][["epoch", "train_loss_epoch"]]
-        loss_df = pd.merge(train_loss_df, val_loss_df, on="epoch").set_index("epoch", verify_integrity=True)
-    elif "train_loss_epoch" in metrics_df.columns and "val_loss" not in metrics_df.columns:
-        loss_df = metrics_df[metrics_df["train_loss_epoch"].notnull()][["epoch", "train_loss_epoch"]]
+        val_loss_df = metrics_df[metrics_df["val_loss"].notnull()][
+            ["epoch", "val_loss"]
+        ]
+        train_loss_df = metrics_df[metrics_df["train_loss_epoch"].notnull()][
+            ["epoch", "train_loss_epoch"]
+        ]
+        loss_df = pd.merge(train_loss_df, val_loss_df, on="epoch").set_index(
+            "epoch", verify_integrity=True
+        )
+    elif (
+        "train_loss_epoch" in metrics_df.columns
+        and "val_loss" not in metrics_df.columns
+    ):
+        loss_df = metrics_df[metrics_df["train_loss_epoch"].notnull()][
+            ["epoch", "train_loss_epoch"]
+        ]
         loss_df = loss_df.set_index("epoch", verify_integrity=True)
     else:
         # no train_loss_epoch --> shouldn't happen
@@ -478,10 +584,16 @@ class CondorStopping(Callback):
         self.stopped = False
 
     def _should_skip_check(self, trainer: "pl.Trainer") -> bool:
-        from pytorch_lightning.trainer.states import TrainerFn
-        return trainer.state.fn != TrainerFn.FITTING or trainer.sanity_checking
+        from lightning.pytorch.trainer.states import RunningStage, TrainerFn
 
-    def on_validation_end(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
+        return (
+            trainer.state.fn != TrainerFn.FITTING
+            or trainer.state.stage == RunningStage.SANITY_CHECKING
+        )
+
+    def on_validation_end(
+        self, trainer: "pl.Trainer", pl_module: "pl.LightningModule"
+    ) -> None:
         if self._should_skip_check(trainer):
             return
 
@@ -496,7 +608,7 @@ class CondorStopping(Callback):
         should_stop = self._evaluate_stopping_criteria(trainer)
 
         # stop every ddp process if any world process decides to stop
-        should_stop = trainer.strategy.reduce_boolean_decision(should_stop)
+        should_stop = trainer.strategy.reduce_boolean_decision(should_stop, all=False)
         trainer.should_stop = trainer.should_stop or should_stop
         if should_stop:
             self.stopped = True
@@ -531,7 +643,11 @@ def create_log_dir(log_dir_base, given_uuid):
         existing_log_dir, log_dir = check_for_existing_log_dir(log_dir_base, my_uuid)
         if not existing_log_dir:
             # did not find an existing log directory, create our own using the supplied UUID
-            print("Did not find existing log directory corresponding to given UUID: {}".format(my_uuid))
+            print(
+                "Did not find existing log directory corresponding to given UUID: {}".format(
+                    my_uuid
+                )
+            )
             log_dir = utils.log_dir_name(log_dir_base, my_uuid)
             os.makedirs(log_dir, exist_ok=True)
             print("Created log directory: {}".format(log_dir))
@@ -551,13 +667,21 @@ def check_for_existing_log_dir(log_dir_base, my_uuid):
         return False, None
 
     # looking within the log_dir_base directory
-    log_dirs = [join(log_dir_base, x) for x in os.listdir(log_dir_base) if isdir(join(log_dir_base, x))]
+    log_dirs = [
+        join(log_dir_base, x)
+        for x in os.listdir(log_dir_base)
+        if isdir(join(log_dir_base, x))
+    ]
 
     # simply see if any of the log directory names contain the given UUID
     log_dir = None
     for ld in log_dirs:
         if my_uuid in basename(ld).split("_"):
-            print("Found existing log directory corresponding to given UUID: {}".format(ld))
+            print(
+                "Found existing log directory corresponding to given UUID: {}".format(
+                    ld
+                )
+            )
             log_dir = ld
             existing_log_dir = True
             break
@@ -578,18 +702,18 @@ def get_next_version(log_dir):
     return max(existing_versions) + 1
 
 
-def init_loggers(log_dir,
-                 my_uuid,
-                 use_wandb,
-                 wandb_online,
-                 wandb_project) -> Union[tuple[WandbLogger, TensorBoardLogger, CSVLogger],
-                                         tuple[TensorBoardLogger, CSVLogger]]:
-    """ set up logger callbacks for trainer """
+def init_loggers(
+    log_dir, my_uuid, use_wandb, wandb_online, wandb_project
+) -> Union[
+    tuple[WandbLogger, TensorBoardLogger, CSVLogger],
+    tuple[TensorBoardLogger, CSVLogger],
+]:
+    """set up logger callbacks for trainer"""
     tb_logger = TensorBoardLogger(
         save_dir=join(log_dir, "tensorboard_{}".format(my_uuid)),
         name="",
         version="",
-        log_graph=False
+        log_graph=False,
     )
     wandb_logger = None
     if use_wandb:
@@ -599,13 +723,9 @@ def init_loggers(log_dir,
             name=my_uuid,
             offline=not wandb_online,
             project=wandb_project,
-            settings=wandb.Settings(symlink=False)
+            settings=wandb.Settings(symlink=False),
         )
-    csv_logger = CSVLogger(
-        save_dir=log_dir,
-        name="",
-        version=""
-    )
+    csv_logger = CSVLogger(save_dir=log_dir, name="", version="")
 
     if use_wandb:
         return wandb_logger, tb_logger, csv_logger
@@ -614,37 +734,64 @@ def init_loggers(log_dir,
 
 
 class OptimizerConfig:
-    """ reusable optimizer configuration """
+    """reusable optimizer configuration"""
 
     @staticmethod
     def add_model_specific_args(parent_parser):
         p = ArgumentParser(parents=[parent_parser], add_help=False)
-        p.add_argument('--optimizer', type=str, default="adamw", choices=["sgd", "adamw", "adam"])
-        p.add_argument('--weight_decay', type=float, default=0.01,
-                       help="weight decay parameter for optimizer")
-        p.add_argument('--learning_rate', type=float, default=0.0001)
-        p.add_argument('--lr_scheduler', type=str, default="constant",
-                       choices=["constant", "warmup_constant", "warmup_cosine_decay",
-                                "dual_phase_warmup_constant", "dual_phase_warmup_constant_cosine_decay"]),
-        p.add_argument('--warmup_steps', type=float, default=.02,
-                       help="number or fraction of warmup steps for warmup_cosine_decay")
-        p.add_argument('--phase2_lr_ratio', type=float, default=1.0,
-                       help="phase 2 lr ratio for dual_phase_warmup_constant lr scheduler")
+        p.add_argument(
+            "--optimizer", type=str, default="adamw", choices=["sgd", "adamw", "adam"]
+        )
+        p.add_argument(
+            "--weight_decay",
+            type=float,
+            default=0.01,
+            help="weight decay parameter for optimizer",
+        )
+        p.add_argument("--learning_rate", type=float, default=0.0001)
+        (
+            p.add_argument(
+                "--lr_scheduler",
+                type=str,
+                default="constant",
+                choices=[
+                    "constant",
+                    "warmup_constant",
+                    "warmup_cosine_decay",
+                    "dual_phase_warmup_constant",
+                    "dual_phase_warmup_constant_cosine_decay",
+                ],
+            ),
+        )
+        p.add_argument(
+            "--warmup_steps",
+            type=float,
+            default=0.02,
+            help="number or fraction of warmup steps for warmup_cosine_decay",
+        )
+        p.add_argument(
+            "--phase2_lr_ratio",
+            type=float,
+            default=1.0,
+            help="phase 2 lr ratio for dual_phase_warmup_constant lr scheduler",
+        )
         return p
 
-    def __init__(self,
-                 optimizer: str,
-                 weight_decay: float,
-                 learning_rate: float,
-                 lr_scheduler: str,
-                 # for lr schedulers that use warmup
-                 warmup_steps: float,
-                 # for dual_phase lr schedulers
-                 phase2_lr_ratio: float,
-                 unfreeze_backbone_at_epoch: int = None,
-                 max_epochs: int = None,
-                 *args, **kwargs):
-
+    def __init__(
+        self,
+        optimizer: str,
+        weight_decay: float,
+        learning_rate: float,
+        lr_scheduler: str,
+        # for lr schedulers that use warmup
+        warmup_steps: float,
+        # for dual_phase lr schedulers
+        phase2_lr_ratio: float,
+        unfreeze_backbone_at_epoch: int = None,
+        max_epochs: int = None,
+        *args,
+        **kwargs,
+    ):
         super().__init__()
 
         self.optimizer = optimizer
@@ -661,18 +808,36 @@ class OptimizerConfig:
 
     def error_checking(self):
         if self.optimizer == "adam" and self.weight_decay != 0:
-            warnings.warn("Optimizer is set to adam (not adamW) with weight_decay={}. "
-                          "If using weight_decay!=0, recommend using adamW ".format(self.weight_decay))
+            warnings.warn(
+                "Optimizer is set to adam (not adamW) with weight_decay={}. "
+                "If using weight_decay!=0, recommend using adamW ".format(
+                    self.weight_decay
+                )
+            )
 
     def init_optimizer(self, trainable_parameters):
         if self.optimizer == "adam":
-            optimizer = torch.optim.Adam(trainable_parameters, lr=self.learning_rate, weight_decay=self.weight_decay)
+            optimizer = torch.optim.Adam(
+                trainable_parameters,
+                lr=self.learning_rate,
+                weight_decay=self.weight_decay,
+            )
         elif self.optimizer == "adamw":
-            optimizer = torch.optim.AdamW(trainable_parameters, lr=self.learning_rate, weight_decay=self.weight_decay)
+            optimizer = torch.optim.AdamW(
+                trainable_parameters,
+                lr=self.learning_rate,
+                weight_decay=self.weight_decay,
+            )
         elif self.optimizer == "sgd":
-            optimizer = torch.optim.SGD(trainable_parameters, lr=self.learning_rate, weight_decay=self.weight_decay)
+            optimizer = torch.optim.SGD(
+                trainable_parameters,
+                lr=self.learning_rate,
+                weight_decay=self.weight_decay,
+            )
         else:
-            raise ValueError("unsupported value for optimizer: {}".format(self.optimizer))
+            raise ValueError(
+                "unsupported value for optimizer: {}".format(self.optimizer)
+            )
         return optimizer
 
     def calc_warmup_steps(self, estimated_stepping_batches):
@@ -682,10 +847,11 @@ class OptimizerConfig:
             ws = self.warmup_steps * estimated_stepping_batches
         return ws
 
-    def get_optimizer_config(self,
-                             trainable_parameters: Iterator[torch.nn.Parameter],
-                             estimated_stepping_batches: int):
-
+    def get_optimizer_config(
+        self,
+        trainable_parameters: Iterator[torch.nn.Parameter],
+        estimated_stepping_batches: int,
+    ):
         optimizer = self.init_optimizer(trainable_parameters)
 
         if self.lr_scheduler == "warmup_cosine_decay":
@@ -694,7 +860,9 @@ class OptimizerConfig:
             print("Number of warmup steps is {}".format(ws))
 
             lr_scheduler_config = {
-                "scheduler": CosineWarmupScheduler(optimizer, warmup=ws, max_iters=estimated_stepping_batches),
+                "scheduler": CosineWarmupScheduler(
+                    optimizer, warmup=ws, max_iters=estimated_stepping_batches
+                ),
                 "interval": "step",
             }
             return {"optimizer": optimizer, "lr_scheduler": lr_scheduler_config}
@@ -712,7 +880,10 @@ class OptimizerConfig:
 
             return {"optimizer": optimizer, "lr_scheduler": lr_scheduler_config}
 
-        elif self.lr_scheduler in ["dual_phase_warmup_constant", "dual_phase_warmup_constant_cosine_decay"]:
+        elif self.lr_scheduler in [
+            "dual_phase_warmup_constant",
+            "dual_phase_warmup_constant_cosine_decay",
+        ]:
             # a special warmup scheduler configured to do another round of warmup
             # halfway through training... meant for use w/ finetuning callback
             ws = self.calc_warmup_steps(estimated_stepping_batches)
@@ -722,11 +893,16 @@ class OptimizerConfig:
             # if both unfreeze_backbone_at_epoch and max_epochs are set, then
             # we can calculate the step at which to start the second phase of warmup
             # otherwise, we just use the default of halfway through training
-            if self.unfreeze_backbone_at_epoch is not None and self.max_epochs is not None:
+            if (
+                self.unfreeze_backbone_at_epoch is not None
+                and self.max_epochs is not None
+            ):
                 # determine the step at which to start the second phase of warmup
                 # based on the estimated number of steps per epoch and the epoch at which to unfreeze the backbone
                 steps_per_epoch = estimated_stepping_batches / self.max_epochs
-                phase2_start_step = int(self.unfreeze_backbone_at_epoch * steps_per_epoch)
+                phase2_start_step = int(
+                    self.unfreeze_backbone_at_epoch * steps_per_epoch
+                )
             else:
                 # default to halfway through training
                 phase2_start_step = int(estimated_stepping_batches / 2)
@@ -735,19 +911,25 @@ class OptimizerConfig:
 
             # set up the learning rate scheduler configuration
             if self.lr_scheduler == "dual_phase_warmup_constant":
-                scheduler = DualPhaseConstantWarmupScheduler(optimizer=optimizer,
-                                                             num_warmup_steps=ws,
-                                                             phase2_start_step=phase2_start_step,
-                                                             phase2_lr_ratio=self.phase2_lr_ratio)
+                scheduler = DualPhaseConstantWarmupScheduler(
+                    optimizer=optimizer,
+                    num_warmup_steps=ws,
+                    phase2_start_step=phase2_start_step,
+                    phase2_lr_ratio=self.phase2_lr_ratio,
+                )
             elif self.lr_scheduler == "dual_phase_warmup_constant_cosine_decay":
-                scheduler = DualPhaseConstantWarmupCosineDecayScheduler(optimizer=optimizer,
-                                                                        total_steps=estimated_stepping_batches,
-                                                                        num_warmup_steps=ws,
-                                                                        phase2_start_step=phase2_start_step,
-                                                                        phase2_lr_ratio=self.phase2_lr_ratio)
+                scheduler = DualPhaseConstantWarmupCosineDecayScheduler(
+                    optimizer=optimizer,
+                    total_steps=estimated_stepping_batches,
+                    num_warmup_steps=ws,
+                    phase2_start_step=phase2_start_step,
+                    phase2_lr_ratio=self.phase2_lr_ratio,
+                )
             else:
                 # this shouldn't happen
-                raise ValueError("unknown learning rate scheduler: {}".format(self.lr_scheduler))
+                raise ValueError(
+                    "unknown learning rate scheduler: {}".format(self.lr_scheduler)
+                )
 
             lr_scheduler_config = {
                 "scheduler": scheduler,
@@ -759,12 +941,16 @@ class OptimizerConfig:
         elif self.lr_scheduler == "constant":
             # temporary workaround for finetuning scheduler, which requires a scheduler config
             lr_scheduler_config = {
-                "scheduler": torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda epoch: 1.0),
+                "scheduler": torch.optim.lr_scheduler.LambdaLR(
+                    optimizer, lr_lambda=lambda epoch: 1.0
+                ),
                 "interval": "step",
             }
             return {"optimizer": optimizer, "lr_scheduler": lr_scheduler_config}
         else:
-            raise ValueError("unknown learning rate scheduler: {}".format(self.lr_scheduler))
+            raise ValueError(
+                "unknown learning rate scheduler: {}".format(self.lr_scheduler)
+            )
 
 
 class DelayedStartEarlyStopping(EarlyStopping):
@@ -773,48 +959,72 @@ class DelayedStartEarlyStopping(EarlyStopping):
         # set start_epoch to None or 0 for no delay
         self.start_epoch = start_epoch
 
-    def on_train_epoch_end(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
-        if (self.start_epoch is not None) and (trainer.current_epoch < self.start_epoch):
+    def on_train_epoch_end(
+        self, trainer: "pl.Trainer", pl_module: "pl.LightningModule"
+    ) -> None:
+        if (self.start_epoch is not None) and (
+            trainer.current_epoch < self.start_epoch
+        ):
             return
         super().on_train_epoch_end(trainer, pl_module)
 
-    def on_validation_end(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
-        if (self.start_epoch is not None) and (trainer.current_epoch < self.start_epoch):
+    def on_validation_end(
+        self, trainer: "pl.Trainer", pl_module: "pl.LightningModule"
+    ) -> None:
+        if (self.start_epoch is not None) and (
+            trainer.current_epoch < self.start_epoch
+        ):
             return
         super().on_validation_end(trainer, pl_module)
 
 
 class DelayedStartModelCheckpoint(ModelCheckpoint):
-    """ only starts saving topk/monitored checkpoints after start_epoch """
+    """only starts saving topk/monitored checkpoints after start_epoch"""
+
     def __init__(self, start_epoch, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.start_epoch = start_epoch
 
-    def _save_topk_checkpoint(self, trainer: "pl.Trainer", monitor_candidates: Dict[str, Tensor]) -> None:
+    def on_save_checkpoint(
+        self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", checkpoint
+    ) -> None:
         # do not save or update related state for topk checkpoints until the start epoch
-        if (self.start_epoch is not None) and (trainer.current_epoch < self.start_epoch):
+        if (self.start_epoch is not None) and (
+            trainer.current_epoch < self.start_epoch
+        ):
             return
-        super()._save_topk_checkpoint(trainer, monitor_candidates)
+        super().on_save_checkpoint(trainer, pl_module, checkpoint)
 
 
 class SimpleProgressMessages(Callback):
-
-    def on_sanity_check_start(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
+    def on_sanity_check_start(
+        self, trainer: "pl.Trainer", pl_module: "pl.LightningModule"
+    ) -> None:
         print("Starting sanity check...")
 
-    def on_sanity_check_end(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
+    def on_sanity_check_end(
+        self, trainer: "pl.Trainer", pl_module: "pl.LightningModule"
+    ) -> None:
         print("Sanity check complete.")
 
-    def on_train_start(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
+    def on_train_start(
+        self, trainer: "pl.Trainer", pl_module: "pl.LightningModule"
+    ) -> None:
         print("Starting training...")
 
-    def on_train_epoch_end(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
-        if trainer.sanity_checking:
+    def on_train_epoch_end(
+        self, trainer: "pl.Trainer", pl_module: "pl.LightningModule"
+    ) -> None:
+        from lightning.pytorch.trainer.states import RunningStage
+
+        if trainer.state.stage == RunningStage.SANITY_CHECKING:
             # don't print progress during the sanity check
             return
-        train_loss_epoch = trainer.callback_metrics.get('train_loss_epoch', np.nan)
-        val_loss = trainer.callback_metrics.get('val_loss', np.nan)
-        print(f"Epoch {trainer.current_epoch:>5}: Train Loss = {train_loss_epoch:>7.3f}, Val Loss = {val_loss:>7.3f}")
+        train_loss_epoch = trainer.callback_metrics.get("train_loss_epoch", np.nan)
+        val_loss = trainer.callback_metrics.get("val_loss", np.nan)
+        print(
+            f"Epoch {trainer.current_epoch:>5}: Train Loss = {train_loss_epoch:>7.3f}, Val Loss = {val_loss:>7.3f}"
+        )
 
     def on_test_start(self, trainer, pl_module):
         print("Starting testing...")
@@ -825,5 +1035,5 @@ class SimpleProgressMessages(Callback):
     def on_predict_start(self, trainer, pl_module):
         print("Starting prediction...")
 
-    def on_predict_epoch_end(self, trainer, pl_module, outputs):
+    def on_predict_epoch_end(self, trainer, pl_module):
         print("Prediction complete.")

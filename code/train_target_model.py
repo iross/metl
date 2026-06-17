@@ -7,53 +7,67 @@ from argparse import ArgumentParser
 from os.path import join
 from typing import Optional, Union
 
-import pytorch_lightning as pl
+import lightning.pytorch as pl
+import numpy as np
 import torch
 import wandb
-from pytorch_lightning import Callback
-from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint, TQDMProgressBar, \
-    LearningRateMonitor, Checkpoint, StochasticWeightAveraging, ModelSummary, RichProgressBar, RichModelSummary
-import numpy as np
+from lightning.pytorch import Callback
+from lightning.pytorch.callbacks import (
+    Checkpoint,
+    EarlyStopping,
+    LearningRateMonitor,
+    ModelCheckpoint,
+    ModelSummary,
+    RichModelSummary,
+    RichProgressBar,
+    StochasticWeightAveraging,
+    TQDMProgressBar,
+)
 
 try:
-    from . import models
-    from . import training_utils
-    from . import utils
+    from train_source_model import get_checkpoint_path
+
+    from . import analysis_utils as an
+    from . import finetuning_callbacks, models, training_utils, utils
     from .datamodules import DMSDataModule
-    from . import finetuning_callbacks
     from .finetuning_callbacks import AnyFinetuning
     from .tasks import DMSTask
-    from . import analysis_utils as an
-    from train_source_model import get_checkpoint_path
 except ImportError:
+    import analysis_utils as an
+    import finetuning_callbacks
     import models
     import training_utils
     import utils
     from datamodules import DMSDataModule
-    import finetuning_callbacks
     from finetuning_callbacks import AnyFinetuning
     from tasks import DMSTask
-    import analysis_utils as an
 
 logging.basicConfig(level=logging.INFO)
 
 # this warning pops up due to the way the data is fed in with a single PDB file for the entire batch.
 # PyTorch lightning correctly infers the batch size. this is not a problem so just silence it.
-warnings.filterwarnings("ignore", message="Trying to infer the `batch_size` from an ambiguous collection.")
+warnings.filterwarnings(
+    "ignore", message="Trying to infer the `batch_size` from an ambiguous collection."
+)
 
 # this warning pops up due to the way we create log directories manually
 # not a concern for us, so silence it to prevent confusion for users
-warnings.filterwarnings("ignore", message="Experiment logs directory .* exists and is not empty.")
+warnings.filterwarnings(
+    "ignore", message="Experiment logs directory .* exists and is not empty."
+)
 
 # MPS is not fully supported, so no need to get a warning about it
 warnings.filterwarnings("ignore", message="MPS available but not used.")
 
 # this will only be a problem with very large datasets, not a concern for us
-warnings.filterwarnings("ignore", message="Metric `SpearmanCorrcoef` will save all targets and predictions")
+warnings.filterwarnings(
+    "ignore", message="Metric `SpearmanCorrcoef` will save all targets and predictions"
+)
 
 
-def init_basic_callbacks(enable_progress_bar: bool = True,
-                         enable_simple_progress_messages: bool = False) -> list[Callback]:
+def init_basic_callbacks(
+    enable_progress_bar: bool = True, enable_simple_progress_messages: bool = False
+) -> list[Callback]:
     callbacks = [
         # ModelSummary(max_depth=-1),
         RichModelSummary(max_depth=3),
@@ -71,23 +85,32 @@ def init_basic_callbacks(enable_progress_bar: bool = True,
 
 
 def init_callbacks(args, log_dir, dm) -> list[Callback]:
-
     # get the basic callbacks
-    callbacks = init_basic_callbacks(args.enable_progress_bar, args.enable_simple_progress_messages)
+    callbacks = init_basic_callbacks(
+        args.enable_progress_bar, args.enable_simple_progress_messages
+    )
 
     # determine quantity to monitor w/ checkpoint and early stopping callbacks
     # if we are using early stopping, then we also want the checkpoint callback to monitor the same quantity
     # because the checkpoint callback is used to reload the checkpoint w/ best quantity
-    if args.es_monitor != "auto" and args.ckpt_monitor != "auto" and args.es_monitor != args.ckpt_monitor:
-        warnings.warn("Monitors es_monitor and ckpt_monitor are set to different values, which means we may early stop "
-                      "at a certain epoch but use a checkpoint from a different epoch based on each monitored "
-                      "quantity. This is probably unintentional.")
+    if (
+        args.es_monitor != "auto"
+        and args.ckpt_monitor != "auto"
+        and args.es_monitor != args.ckpt_monitor
+    ):
+        warnings.warn(
+            "Monitors es_monitor and ckpt_monitor are set to different values, which means we may early stop "
+            "at a certain epoch but use a checkpoint from a different epoch based on each monitored "
+            "quantity. This is probably unintentional."
+        )
 
     es_monitor = None
     if args.early_stopping:
         if args.es_monitor == "auto":
             if not dm.has_val_set:
-                warnings.warn("Using train loss for early stopping because no validation set provided")
+                warnings.warn(
+                    "Using train loss for early stopping because no validation set provided"
+                )
             es_monitor = "val_loss" if dm.has_val_set else "train_loss_epoch"
         else:
             es_monitor = "val_loss" if args.es_monitor == "val" else "train_loss_epoch"
@@ -104,7 +127,9 @@ def init_callbacks(args, log_dir, dm) -> list[Callback]:
 
     # monitor the best train or val loss depending on the monitored metric
     if ckpt_monitor is not None:
-        callbacks.append(training_utils.BestMetricLogger(metric=ckpt_monitor, mode="min"))
+        callbacks.append(
+            training_utils.BestMetricLogger(metric=ckpt_monitor, mode="min")
+        )
 
     # set up model checkpoint and early stopping callbacks
     checkpoint_callback = ModelCheckpoint(
@@ -112,7 +137,7 @@ def init_callbacks(args, log_dir, dm) -> list[Callback]:
         mode="min",
         every_n_epochs=1,
         dirpath=join(log_dir, "checkpoints"),
-        save_last=True
+        save_last=True,
     )
     callbacks.append(checkpoint_callback)
 
@@ -122,7 +147,7 @@ def init_callbacks(args, log_dir, dm) -> list[Callback]:
             min_delta=args.es_min_delta,
             patience=args.es_patience,
             verbose=True,
-            mode='min'
+            mode="min",
         )
         callbacks.append(early_stop_callback)
 
@@ -134,10 +159,12 @@ def init_callbacks(args, log_dir, dm) -> list[Callback]:
     # backbone finetuning callback
     elif args.finetuning and args.finetuning_strategy == "backbone":
         if args.early_stopping:
-            warnings.warn("Using epoch-based backbone finetuning with early stopping enabled. It is possible early "
-                          "stopping triggers before the backbone is unfrozen, thus no finetuning would take place. "
-                          "Consider using in combination with min_epochs so early stopping only triggers during "
-                          "the finetuning phase, if that's what you're going for.")
+            warnings.warn(
+                "Using epoch-based backbone finetuning with early stopping enabled. It is possible early "
+                "stopping triggers before the backbone is unfrozen, thus no finetuning would take place. "
+                "Consider using in combination with min_epochs so early stopping only triggers during "
+                "the finetuning phase, if that's what you're going for."
+            )
         finetuning_callback = AnyFinetuning(
             unfreeze_backbone_at_epoch=args.unfreeze_backbone_at_epoch,
             always_align_lr=args.backbone_always_align_lr,
@@ -146,34 +173,41 @@ def init_callbacks(args, log_dir, dm) -> list[Callback]:
             should_align=True,
             train_bn=args.train_bn,
             verbose=False,
-            backbone_access_string="model.model.backbone")
+            backbone_access_string="model.model.backbone",
+        )
         callbacks.append(finetuning_callback)
 
     # stochastic weight averaging callback
     if args.swa:
-        swa_callback = StochasticWeightAveraging(swa_lrs=args.swa_lr, swa_epoch_start=args.swa_epoch_start)
+        swa_callback = StochasticWeightAveraging(
+            swa_lrs=args.swa_lr, swa_epoch_start=args.swa_epoch_start
+        )
         callbacks.append(swa_callback)
 
     return callbacks
 
 
 def error_checking(args):
-    """ errors and warnings """
+    """errors and warnings"""
     if models.Model[args.model_name].transfer_model:
         if not args.finetuning:
-            warnings.warn("Using a transfer learning model, but finetuning is disabled. This means the whole model "
-                          "will be trained end-to-end. There are no frozen layers or finetuning.")
+            warnings.warn(
+                "Using a transfer learning model, but finetuning is disabled. This means the whole model "
+                "will be trained end-to-end. There are no frozen layers or finetuning."
+            )
 
 
 def log_config(loggers, args):
-    """ log additional config to make processing runs easier
-        note this has to be logged separately for each logger because it's being logged outside the LightningModule
-        just logging this to wandb for now """
+    """log additional config to make processing runs easier
+    note this has to be logged separately for each logger because it's being logged outside the LightningModule
+    just logging this to wandb for now"""
 
-    config = {"eval_type": an.get_eval_type(args.split_dir),
-              "train_size": an.get_train_size(args.split_dir),
-              "split_rep_num": an.get_split_rep_num(args.split_dir),
-              "seed": args.seed}
+    config = {
+        "eval_type": an.get_eval_type(args.split_dir),
+        "train_size": an.get_train_size(args.split_dir),
+        "split_rep_num": an.get_split_rep_num(args.split_dir),
+        "seed": args.seed,
+    }
 
     if args.use_wandb:
         wandb_logger = loggers[0]
@@ -181,7 +215,7 @@ def log_config(loggers, args):
 
 
 def es_warning(ckpt_callback, es_callback):
-    """ early stopping vs. model checkpoint epoch warning """
+    """early stopping vs. model checkpoint epoch warning"""
     ckpt_epoch = int(ckpt_callback.best_model_path.split("-")[0].split("=")[-1])
 
     # early stopping is optional so check if None
@@ -219,7 +253,9 @@ def metrics_df_to_dict(df, suffix=""):
 
 
 def log_metrics(raw_preds, dm, log_dir, trainer, args):
-    predictions_d = training_utils.save_predictions(raw_preds, dm, log_dir, save_format="npy")
+    predictions_d = training_utils.save_predictions(
+        raw_preds, dm, log_dir, save_format="npy"
+    )
     training_utils.save_scatterplots(dm, predictions_d, log_dir)
     metrics_df = training_utils.save_metrics_custom(dm, predictions_d, log_dir)
     training_utils.plot_losses(log_dir)
@@ -231,16 +267,21 @@ def log_metrics(raw_preds, dm, log_dir, trainer, args):
     if args.save_last_metrics:
         # saves a metric_custom_last.txt file with the metrics computed on the last checkpoint
         # run the test metrics via PTL for wandb :)
-        raw_preds = trainer.predict(ckpt_path="last", datamodule=dm, return_predictions=True)
-        predictions_d = training_utils.save_predictions(raw_preds, dm, log_dir, save_format="npy", suffix="_last")
+        raw_preds = trainer.predict(
+            ckpt_path="last", datamodule=dm, return_predictions=True
+        )
+        predictions_d = training_utils.save_predictions(
+            raw_preds, dm, log_dir, save_format="npy", suffix="_last"
+        )
         training_utils.save_scatterplots(dm, predictions_d, log_dir, suffix="_last")
-        metrics_df = training_utils.save_metrics_custom(dm, predictions_d, log_dir, suffix="_last")
+        metrics_df = training_utils.save_metrics_custom(
+            dm, predictions_d, log_dir, suffix="_last"
+        )
         if args.use_wandb and metrics_df is not None:
             wandb.log(metrics_df_to_dict(metrics_df, suffix="_last"))
 
 
 def main(args: argparse.Namespace):
-
     error_checking(args)
     verify_set_seed(args)
 
@@ -259,10 +300,14 @@ def main(args: argparse.Namespace):
     args.uuid = my_uuid
 
     # save arguments to the log directory
-    utils.save_args(vars(args), join(log_dir, "args.txt"), ignore=["cluster", "process"])
+    utils.save_args(
+        vars(args), join(log_dir, "args.txt"), ignore=["cluster", "process"]
+    )
 
     # set up logger callbacks for training
-    loggers = training_utils.init_loggers(log_dir, my_uuid, args.use_wandb, args.wandb_online, args.wandb_project)
+    loggers = training_utils.init_loggers(
+        log_dir, my_uuid, args.use_wandb, args.wandb_online, args.wandb_project
+    )
 
     # log some config parameters for wandb to make exploring runs easier
     log_config(loggers, args)
@@ -271,14 +316,16 @@ def main(args: argparse.Namespace):
     dm = DMSDataModule(**vars(args))
 
     # create the model and task
-    task = DMSTask(num_tasks=dm.num_tasks,
-                   num_tokens=dm.num_tokens,
-                   aa_seq_len=dm.aa_seq_len,
-                   aa_encoding_len=dm.aa_encoding_len,
-                   seq_encoding_len=dm.seq_encoding_len,
-                   pdb_fns=dm.unique_pdb_fns,
-                   example_input_array=dm.example_input_array,
-                   **vars(args))
+    task = DMSTask(
+        num_tasks=dm.num_tasks,
+        num_tokens=dm.num_tokens,
+        aa_seq_len=dm.aa_seq_len,
+        aa_encoding_len=dm.aa_encoding_len,
+        seq_encoding_len=dm.seq_encoding_len,
+        pdb_fns=dm.unique_pdb_fns,
+        example_input_array=dm.example_input_array,
+        **vars(args),
+    )
 
     callbacks = init_callbacks(args, log_dir, dm)
 
@@ -290,12 +337,24 @@ def main(args: argparse.Namespace):
     # so if we are running on condor, specify devices = 1
     # if running locally, use devices = auto which should select available CPU cores
     devices = "auto" if args.cluster == "local" else 1
-    trainer: pl.Trainer = pl.Trainer.from_argparse_args(args,
-                                                        default_root_dir=log_dir,
-                                                        callbacks=callbacks,
-                                                        logger=loggers,
-                                                        accelerator=accelerator,
-                                                        devices=devices)
+    trainer: pl.Trainer = pl.Trainer(
+        default_root_dir=log_dir,
+        callbacks=callbacks,
+        logger=loggers,
+        accelerator=accelerator,
+        devices=devices,
+        max_epochs=args.max_epochs,
+        min_epochs=getattr(args, "min_epochs", None),
+        gradient_clip_val=getattr(args, "gradient_clip_val", None),
+        precision=getattr(args, "precision", "32-true"),
+        accumulate_grad_batches=getattr(args, "accumulate_grad_batches", 1),
+        fast_dev_run=getattr(args, "fast_dev_run", False),
+        limit_train_batches=getattr(args, "limit_train_batches", 1.0),
+        limit_val_batches=getattr(args, "limit_val_batches", 1.0),
+        num_sanity_val_steps=getattr(args, "num_sanity_val_steps", 2),
+        log_every_n_steps=getattr(args, "log_every_n_steps", 50),
+        val_check_interval=getattr(args, "val_check_interval", 1.0),
+    )
 
     trainer.fit(task, datamodule=dm, ckpt_path=get_checkpoint_path(log_dir))
 
@@ -310,10 +369,17 @@ def main(args: argparse.Namespace):
     test_metrics = trainer.test(ckpt_path="best", datamodule=dm)
 
     # save metrics computed by pytorch lightning along w/ the specific checkpoint used to compute those metrics
-    training_utils.save_metrics_ptl(ckpt_callback.best_model_path, ckpt_callback.best_model_score, test_metrics, log_dir)
+    training_utils.save_metrics_ptl(
+        ckpt_callback.best_model_path,
+        ckpt_callback.best_model_score,
+        test_metrics,
+        log_dir,
+    )
 
     # save predictions, scatterplots, and custom metrics. plot train loss vs. val loss
-    raw_preds = trainer.predict(ckpt_path="best", datamodule=dm, return_predictions=True)
+    raw_preds = trainer.predict(
+        ckpt_path="best", datamodule=dm, return_predictions=True
+    )
 
     # log end of training metrics
     log_metrics(raw_preds, dm, log_dir, trainer, args)
@@ -324,50 +390,90 @@ def main(args: argparse.Namespace):
 
 
 def add_target_args(parent_parser):
-    """ args specific to target model training and finetuning (shared with ESM...) """
+    """args specific to target model training and finetuning (shared with ESM...)"""
     p = argparse.ArgumentParser(parents=[parent_parser], add_help=False)
 
     # random seed
-    p.add_argument("--seed", help="random seed to use with pytorch lightning seed_everything"
-                                  "not specifying a seed will use a random seed and record it to args "
-                                  "for future runs",
-                   default=None, type=int)
+    p.add_argument(
+        "--seed",
+        help="random seed to use with pytorch lightning seed_everything"
+        "not specifying a seed will use a random seed and record it to args "
+        "for future runs",
+        default=None,
+        type=int,
+    )
 
     # early stopping
-    p.add_argument("--early_stopping", help="set to enable early stopping", action="store_true")
-    p.add_argument("--es_monitor", help="which loss to monitor", default="auto", choices=["train", "val", "auto"])
-    p.add_argument("--es_patience", help="number of epochs allowance for early stopping", type=int, default=5)
-    p.add_argument("--es_min_delta", help="min by which the loss must decrease to be considered an improvement",
-                   type=float, default=0.001)
+    p.add_argument(
+        "--early_stopping", help="set to enable early stopping", action="store_true"
+    )
+    p.add_argument(
+        "--es_monitor",
+        help="which loss to monitor",
+        default="auto",
+        choices=["train", "val", "auto"],
+    )
+    p.add_argument(
+        "--es_patience",
+        help="number of epochs allowance for early stopping",
+        type=int,
+        default=5,
+    )
+    p.add_argument(
+        "--es_min_delta",
+        help="min by which the loss must decrease to be considered an improvement",
+        type=float,
+        default=0.001,
+    )
 
     # checkpoint callback monitoring metric
     # mostly meant for when early stopping = False, but still want to choose best model based on metric
-    p.add_argument("--ckpt_monitor", help="which loss to monitor for ckpt",
-                   default="auto", choices=["train", "val", "auto"])
+    p.add_argument(
+        "--ckpt_monitor",
+        help="which loss to monitor for ckpt",
+        default="auto",
+        choices=["train", "val", "auto"],
+    )
 
     # fine tuning
     p.add_argument("--finetuning", action="store_true", default=False)
-    p.add_argument("--finetuning_strategy", type=str, default="backbone", choices=["backbone", "extract"])
+    p.add_argument(
+        "--finetuning_strategy",
+        type=str,
+        default="backbone",
+        choices=["backbone", "extract"],
+    )
 
     # for 'backbone' finetuning strategy
     p.add_argument("--unfreeze_backbone_at_epoch", type=int, default=10)
-    p.add_argument("--train_bn", help="whether to train batchnorm in backbone", action="store_true")
+    p.add_argument(
+        "--train_bn", help="whether to train batchnorm in backbone", action="store_true"
+    )
     p.add_argument("--backbone_always_align_lr", action="store_true", default=False)
     p.add_argument("--backbone_initial_ratio_lr", type=float, default=0.1)
     p.add_argument("--backbone_initial_lr", type=float, default=None)
 
     # stochastic weight averaging
-    p.add_argument('--swa', help="set to enable stochastic weight averaging", action="store_true")
-    p.add_argument('--swa_epoch_start', type=int, default=None)
-    p.add_argument('--swa_lr', type=float, default=0.0001)
+    p.add_argument(
+        "--swa", help="set to enable stochastic weight averaging", action="store_true"
+    )
+    p.add_argument("--swa_epoch_start", type=int, default=None)
+    p.add_argument("--swa_lr", type=float, default=0.0001)
 
     # save the metrics for the last checkpoint
-    p.add_argument("--save_last_metrics",
-                   help="set to save metrics for the last checkpoint", action="store_true")
+    p.add_argument(
+        "--save_last_metrics",
+        help="set to save metrics for the last checkpoint",
+        action="store_true",
+    )
 
     # simple progress messages instead of progress bar
-    p.add_argument("--enable_simple_progress_messages", help="set to enable simple progress messages",
-                   action="store_true", default=False)
+    p.add_argument(
+        "--enable_simple_progress_messages",
+        help="set to enable simple progress messages",
+        action="store_true",
+        default=False,
+    )
 
     return p
 
@@ -379,67 +485,124 @@ if __name__ == "__main__":
     parser = add_target_args(parser)
 
     # HTCondor args
-    parser.add_argument("--cluster",
-                        help="cluster (when running on HTCondor)",
-                        type=str,
-                        default="local")
-    parser.add_argument("--process",
-                        help="process (when running on HTCondor)",
-                        type=str,
-                        default="local")
-    parser.add_argument("--github_tag",
-                        help="github tag for current run",
-                        type=str,
-                        default="no_github_tag")
+    parser.add_argument(
+        "--cluster",
+        help="cluster (when running on HTCondor)",
+        type=str,
+        default="local",
+    )
+    parser.add_argument(
+        "--process",
+        help="process (when running on HTCondor)",
+        type=str,
+        default="local",
+    )
+    parser.add_argument(
+        "--github_tag",
+        help="github tag for current run",
+        type=str,
+        default="no_github_tag",
+    )
 
     # additional args
-    parser.add_argument("--log_dir_base",
-                        help="log directory base",
-                        type=str,
-                        default="output/training_logs")
-    parser.add_argument("--uuid",
-                        help="model uuid to resume from or custom uuid to use from scratch",
-                        type=str,
-                        default=None)
+    parser.add_argument(
+        "--log_dir_base",
+        help="log directory base",
+        type=str,
+        default="output/training_logs",
+    )
+    parser.add_argument(
+        "--uuid",
+        help="model uuid to resume from or custom uuid to use from scratch",
+        type=str,
+        default=None,
+    )
 
     # wandb args
-    parser.add_argument('--use_wandb', action='store_true',
-                        help="use wandb for logging")
-    parser.add_argument('--no_use_wandb', dest='use_wandb', action='store_false')
+    parser.add_argument(
+        "--use_wandb", action="store_true", help="use wandb for logging"
+    )
+    parser.add_argument("--no_use_wandb", dest="use_wandb", action="store_false")
     parser.set_defaults(use_wandb=True)
-    parser.add_argument("--wandb_online",
-                        action="store_true",
-                        default=False)
-    parser.add_argument("--wandb_project",
-                        type=str,
-                        default="metl_target")
-    parser.add_argument("--experiment",
-                        type=str,
-                        default="default",
-                        help="dummy arg to make wandb tracking and filtering easier")
-    parser.add_argument("--wandb_log_grads",
-                        default=False,
-                        action="store_true",
-                        help="whether to log gradients and parameter histograms to weights&biases")
-    parser.add_argument("--grad_log_freq",
-                        default=500,
-                        type=int,
-                        help="log frequency for gradients")
-    parser.add_argument("--delete_checkpoints",
-                        action="store_true",
-                        default=False)
+    parser.add_argument("--wandb_online", action="store_true", default=False)
+    parser.add_argument("--wandb_project", type=str, default="metl_target")
+    parser.add_argument(
+        "--experiment",
+        type=str,
+        default="default",
+        help="dummy arg to make wandb tracking and filtering easier",
+    )
+    parser.add_argument(
+        "--wandb_log_grads",
+        default=False,
+        action="store_true",
+        help="whether to log gradients and parameter histograms to weights&biases",
+    )
+    parser.add_argument(
+        "--grad_log_freq", default=500, type=int, help="log frequency for gradients"
+    )
+    parser.add_argument("--delete_checkpoints", action="store_true", default=False)
 
     # add data specific args
     parser = DMSDataModule.add_data_specific_args(parser)
 
-    # add all the available trainer options to argparse
-    # ie: now --gpus --num_nodes ... --fast_dev_run all work in the cli
-    parser = pl.Trainer.add_argparse_args(parser)
+    # trainer options
+    parser.add_argument(
+        "--max_epochs", type=int, default=100, help="max number of epochs to train"
+    )
+    parser.add_argument(
+        "--min_epochs", type=int, default=None, help="min number of epochs to train"
+    )
+    parser.add_argument(
+        "--gradient_clip_val", type=float, default=None, help="gradient clipping value"
+    )
+    parser.add_argument(
+        "--precision",
+        type=str,
+        default="32-true",
+        help="floating point precision (e.g. 32-true, 16-mixed, bf16-mixed)",
+    )
+    parser.add_argument(
+        "--accumulate_grad_batches",
+        type=int,
+        default=1,
+        help="accumulate gradients over N batches",
+    )
+    parser.add_argument(
+        "--fast_dev_run",
+        action="store_true",
+        default=False,
+        help="run 1 train, val, test batch for debugging",
+    )
+    parser.add_argument(
+        "--limit_train_batches",
+        type=float,
+        default=1.0,
+        help="fraction of training batches to use",
+    )
+    parser.add_argument(
+        "--limit_val_batches",
+        type=float,
+        default=1.0,
+        help="fraction of val batches to use",
+    )
+    parser.add_argument(
+        "--num_sanity_val_steps", type=int, default=2, help="number of sanity val steps"
+    )
+    parser.add_argument(
+        "--log_every_n_steps", type=int, default=50, help="log every N steps"
+    )
+    parser.add_argument(
+        "--val_check_interval",
+        type=float,
+        default=1.0,
+        help="how often to run validation",
+    )
 
     # figure out which model to use
     # need to have this additional argument parser line to add the fromfile_prefix_chars
     # this lets us specify the model_name in the file along with model specific args
-    parser = ArgumentParser(parents=[parser], fromfile_prefix_chars='@', add_help=False)
+    parser = ArgumentParser(parents=[parser], fromfile_prefix_chars="@", add_help=False)
 
     # special model choice "transfer_model" signifies we are loading a backbone from a checkpoint
     # transfer_model_keyword = "transfer_model"
@@ -454,12 +617,14 @@ if __name__ == "__main__":
     parser = DMSTask.add_model_specific_args(parser)
 
     # add model-specific args
-    add_args_op = getattr(models.Model[temp_args.model_name].cls, "add_model_specific_args", None)
+    add_args_op = getattr(
+        models.Model[temp_args.model_name].cls, "add_model_specific_args", None
+    )
     if callable(add_args_op):
         parser = add_args_op(parser)
 
     # finally, make sure we can use args from file (can't do this before because it gets overwritten)
-    parser = ArgumentParser(parents=[parser], fromfile_prefix_chars='@', add_help=False)
+    parser = ArgumentParser(parents=[parser], fromfile_prefix_chars="@", add_help=False)
 
     parsed_args = parser.parse_args()
 

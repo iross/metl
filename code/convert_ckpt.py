@@ -1,27 +1,25 @@
-""" Convert lightning checkpoint to pure pytorch.
-    Lightning checkpoints are compatible with pure pytorch, but they may contain additional items
-    that are not needed for inference. so, this script loads the checkpoint and saves a smaller
-    checkpoint with just the model weights and hyperparameters. """
+"""Convert lightning checkpoint to pure pytorch.
+Lightning checkpoints are compatible with pure pytorch, but they may contain additional items
+that are not needed for inference. so, this script loads the checkpoint and saves a smaller
+checkpoint with just the model weights and hyperparameters."""
 
 import argparse
 import os
 import warnings
 from os.path import dirname, join
 
-import pytorch_lightning
+import lightning.pytorch
 import torch
 import torch.nn as nn
 import torchinfo
 
-
 try:
-    from . import models
-    from . import utils
     from . import encode as enc
+    from . import models, utils
 except ImportError:
+    import encode as enc
     import models
     import utils
-    import encode as enc
 
 
 def convert_checkpoint(ckpt_dict):
@@ -35,14 +33,23 @@ def convert_checkpoint(ckpt_dict):
 
     # update keys by dropping the outer "model." from the RosettaTask
     for key in list(state_dict):
-        state_dict[key[len("model."):]] = state_dict.pop(key)
+        state_dict[key[len("model.") :]] = state_dict.pop(key)
 
     # replace the pytorch_lightning.utilities.parsing.AttributeDict with a regular dict
     # this is necessary for a couple old checkpoints because they were saved with AttributeDicts
     # todo: it has been fixed in the latest version, no need to do this anymore once we get into production
     for k, v in hparams.items():
-        if isinstance(v, pytorch_lightning.utilities.parsing.AttributeDict):
-            print("Converting pytorch_lightning.utilities.parsing.AttributeDict to regular dict")
+        # AttributeDict was removed in Lightning 2.x; old checkpoints may still contain it.
+        # Try legacy and new locations; fall back to a plain isinstance check on the class name.
+        try:
+            from lightning.fabric.utilities.data import AttributeDict as _AttrDict
+        except ImportError:
+            _AttrDict = None
+        _is_attr_dict = (_AttrDict is not None and isinstance(v, _AttrDict)) or (
+            type(v).__name__ == "AttributeDict"
+        )
+        if _is_attr_dict:
+            print("Converting AttributeDict to regular dict")
             hparams[k] = dict(v)
 
     new_ckpt_dict = {"state_dict": state_dict, "hyper_parameters": hparams}
@@ -61,7 +68,7 @@ def get_output_dir(args):
 
 
 def get_encoded_seqs(hparams):
-    """ note: this only supports target models at the moment """
+    """note: this only supports target models at the moment"""
 
     ds_name = hparams["ds_name"]
     datasets = utils.load_dataset_metadata()
@@ -106,11 +113,10 @@ def test_converted_checkpoint(pt_checkpoint_fn):
 
 
 def main(args):
-
     print(f"Processing checkpoint: {args.ckpt_path}")
 
     # load the lightning checkpoint with pure pytorch
-    lightning_checkpoint = torch.load(args.ckpt_path, map_location=torch.device('cpu'))
+    lightning_checkpoint = torch.load(args.ckpt_path, map_location=torch.device("cpu"))
     pt_checkpoint = convert_checkpoint(lightning_checkpoint)
 
     # create output directory
@@ -120,7 +126,9 @@ def main(args):
     # get the UUID from the checkpoint hyperparameters (to name the checkpoint)
     uuid = pt_checkpoint["hyper_parameters"]["uuid"]
     if uuid is None:
-        warnings.warn("Checkpoint does not have a UUID, using 'converted.pt' as the filename instead.")
+        warnings.warn(
+            "Checkpoint does not have a UUID, using 'converted.pt' as the filename instead."
+        )
         uuid = "converted"
 
     output_fn = "{}.pt".format(join(output_dir, uuid))
@@ -137,10 +145,18 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(fromfile_prefix_chars="@")
 
-    parser.add_argument("--ckpt_path", required=True, type=str,
-                        help="Path to the checkpoint to convert to pure pytorch.")
+    parser.add_argument(
+        "--ckpt_path",
+        required=True,
+        type=str,
+        help="Path to the checkpoint to convert to pure pytorch.",
+    )
 
-    parser.add_argument("--output_dir", type=str, default="auto",
-                        help="Directory to save the converted checkpoint.")
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default="auto",
+        help="Directory to save the converted checkpoint.",
+    )
 
     main(parser.parse_args())

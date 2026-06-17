@@ -1,35 +1,32 @@
-""" Run inference with METL models."""
+"""Run inference with METL models."""
 
 import argparse
 import warnings
-from os.path import join, isfile, basename, dirname
-from typing import Optional, Any, Type
+from os.path import basename, dirname, isfile, join
+from typing import Any, Optional, Type
 
+import lightning.pytorch as pl
 import pandas as pd
-import pytorch_lightning as pl
 import torch
-from pytorch_lightning import Callback
-from pytorch_lightning.callbacks import ModelSummary
+from lightning.pytorch import Callback
+from lightning.pytorch.callbacks import ModelSummary
 from torch import nn
 
 try:
     # for running locally on Apple Silicon (only available in PyTorch 1.12+)
     import torch.backends.mps
+
     mps_available = torch.backends.mps.is_available()
 except ModuleNotFoundError:
     mps_available = False
 
 import datamodules
-import tasks
 import models
+import tasks
 from training_utils import PredictionWriter
 
 
-def load_pytorch_module(
-        ckpt_fn: str,
-        **override_hparams
-):
-
+def load_pytorch_module(ckpt_fn: str, **override_hparams):
     ckpt = torch.load(ckpt_fn, map_location="cpu")
 
     # load and optionally override saved hyperparameters
@@ -54,30 +51,27 @@ def load_pytorch_module(
 
 
 class PredictModelSummary(ModelSummary):
-    """ the standard ModelSummary callback only triggers on fit start
-        hence this callback which triggers on predict start """
+    """the standard ModelSummary callback only triggers on fit start
+    hence this callback which triggers on predict start"""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
     def on_predict_start(
-            self,
-            trainer: "pl.Trainer",
-            pl_module: "pl.LightningModule") -> None:
+        self, trainer: "pl.Trainer", pl_module: "pl.LightningModule"
+    ) -> None:
         self.on_fit_start(trainer, pl_module)
 
 
 def find_state_dict_transform(
-        checkpoint_keys: set[str],
-        model_keys: set[str]
+    checkpoint_keys: set[str], model_keys: set[str]
 ) -> tuple[Optional[str], Optional[str]]:
+    """this assumes the only mismatch between the checkpoint and model keys
+    is due to uniform prefixing (like model., model.model., etc.) and that
+    the checkpoint and the model keys follow the same class structure but
+    were saved with different wrappers...
 
-    """ this assumes the only mismatch between the checkpoint and model keys
-        is due to uniform prefixing (like model., model.model., etc.) and that
-        the checkpoint and the model keys follow the same class structure but
-        were saved with different wrappers...
-
-        this will work for the existing models trained in this repository
+    this will work for the existing models trained in this repository
     """
 
     # make sure we are getting sets (not dict_keys) so we can do set operations
@@ -93,13 +87,12 @@ def find_state_dict_transform(
     # just check the first pair... however, overhead is minimal
     for ckpt_key in checkpoint_keys:
         for model_key in model_keys:
-
             if ckpt_key.endswith(model_key):
                 # checkpoint key ends with model key
                 # need to strip the prefix from the ckpt key to match the model key
                 strip_prefix = ckpt_key[: -len(model_key)]
                 # check if this transformation works
-                transformed_keys = {k[len(strip_prefix):] for k in checkpoint_keys}
+                transformed_keys = {k[len(strip_prefix) :] for k in checkpoint_keys}
                 if transformed_keys == model_keys:
                     return strip_prefix, ""
 
@@ -116,17 +109,16 @@ def find_state_dict_transform(
 
 
 def transform_state_dict(
-    state_dict: dict[str, Any],
-    strip_prefix: str = "",
-    add_prefix: str = ""
+    state_dict: dict[str, Any], strip_prefix: str = "", add_prefix: str = ""
 ) -> dict[str, Any]:
-
     new_state_dict = {}
     for k, v in state_dict.items():
         if strip_prefix:
             if not k.startswith(strip_prefix):
-                raise ValueError(f"Key '{k}' does not start with prefix '{strip_prefix}'")
-            k = k[len(strip_prefix):]
+                raise ValueError(
+                    f"Key '{k}' does not start with prefix '{strip_prefix}'"
+                )
+            k = k[len(strip_prefix) :]
         new_key = f"{add_prefix}{k}"
         new_state_dict[new_key] = v
     return new_state_dict
@@ -136,11 +128,12 @@ def align_state_dict_keys(
     checkpoint_state_dict: dict[str, Any],
     model_state_dict_keys: set[str],
     *,
-    warn: bool = True
+    warn: bool = True,
 ) -> dict[str, Any]:
-
     ckpt_keys = set(checkpoint_state_dict.keys())
-    strip_prefix, add_prefix = find_state_dict_transform(ckpt_keys, model_state_dict_keys)
+    strip_prefix, add_prefix = find_state_dict_transform(
+        ckpt_keys, model_state_dict_keys
+    )
 
     if (strip_prefix, add_prefix) == (None, None):
         raise RuntimeError("Unable to match checkpoint keys to model keys exactly.")
@@ -158,12 +151,8 @@ def align_state_dict_keys(
 
 
 def load_lightning_module(
-    cls: Type,
-    ckpt: dict,
-    strict: bool = True,
-    **override_hparams
+    cls: Type, ckpt: dict, strict: bool = True, **override_hparams
 ):
-
     # Load and optionally override saved hyperparameters
     hparams = ckpt["hyper_parameters"].copy()
     hparams.update(override_hparams)
@@ -183,7 +172,6 @@ def load_lightning_module(
 
 
 def main(args):
-
     # determine whether we are loading a DMSTask or RosettaTask checkpoint
     ckpt = torch.load(args.pretrained_ckpt_path, map_location="cpu")
     if "_task_type" in ckpt["hyper_parameters"]:
@@ -223,20 +211,26 @@ def main(args):
     ckpt_encoding = "int_seqs" if lm.hparams.encoding == "auto" else lm.hparams.encoding
     if args.encoding != ckpt_encoding:
         if not args.override_encoding:
-            warnings.warn(f"the given encoding ({args.encoding}) does not match the "
-                          f"checkpoint hyperparams ({ckpt_encoding}). setting "
-                          f"the encoding to {ckpt_encoding}. to override this, "
-                          f"provide the --override_encoding flag.")
+            warnings.warn(
+                f"the given encoding ({args.encoding}) does not match the "
+                f"checkpoint hyperparams ({ckpt_encoding}). setting "
+                f"the encoding to {ckpt_encoding}. to override this, "
+                f"provide the --override_encoding flag."
+            )
             args.encoding = ckpt_encoding
         else:
-            print(f"overriding encoding in checkpoint ({lm.hparams.encoding}) with "
-                  f"provided encoding ({args.encoding})")
+            print(
+                f"overriding encoding in checkpoint ({lm.hparams.encoding}) with "
+                f"provided encoding ({args.encoding})"
+            )
 
     # load the datamodule
     if args.dataset_type == "dms":
         if args.predict_mode == "all_sets":
-            warnings.warn("predict_mode 'all_sets' is not currently supported "
-                          "for inference. setting it to 'full_dataset'.")
+            warnings.warn(
+                "predict_mode 'all_sets' is not currently supported "
+                "for inference. setting it to 'full_dataset'."
+            )
             args.predict_mode = "full_dataset"
         dm = datamodules.DMSDataModule(**vars(args))
     elif args.dataset_type == "rosetta":
@@ -264,12 +258,12 @@ def main(args):
         if args.split_dir is not None:
             output_dir = join(
                 args.log_dir_base,
-                f"{uuid}/rosetta_{rosetta_ds_name}/{basename(args.split_dir)}/{args.predict_mode}"
+                f"{uuid}/rosetta_{rosetta_ds_name}/{basename(args.split_dir)}/{args.predict_mode}",
             )
         else:
             output_dir = join(
                 args.log_dir_base,
-                f"{uuid}/rosetta_{rosetta_ds_name}/{args.predict_mode}"
+                f"{uuid}/rosetta_{rosetta_ds_name}/{args.predict_mode}",
             )
     else:
         raise ValueError("Dataset type must be either 'dms' or 'rosetta'")
@@ -292,10 +286,12 @@ def main(args):
     print("Writing predictions to {}".format(save_fn_epoch))
 
     # prediction writer callback to save predictions to file
-    pred_writer = PredictionWriter(output_dir=output_dir,
-                                   save_fn_base=save_fn_base,
-                                   batch_write_mode=args.batch_write_mode,
-                                   write_interval=args.write_interval)
+    pred_writer = PredictionWriter(
+        output_dir=output_dir,
+        save_fn_base=save_fn_base,
+        batch_write_mode=args.batch_write_mode,
+        write_interval=args.write_interval,
+    )
 
     # number of GPUs for trainer
     accelerator = "cpu"
@@ -312,10 +308,7 @@ def main(args):
         callbacks.append(PredictModelSummary(max_depth=-1))
 
     trainer = pl.Trainer(
-        logger=False,
-        callbacks=callbacks,
-        accelerator=accelerator,
-        devices=devices
+        logger=False, callbacks=callbacks, accelerator=accelerator, devices=devices
     )
     trainer.predict(lm, datamodule=dm, return_predictions=False)
 
@@ -329,27 +322,24 @@ if __name__ == "__main__":
         type=str,
         help="write interval for predictions",
         choices=["batch", "epoch", "batch_and_epoch"],
-        default="batch"
+        default="batch",
     )
     parser.add_argument(
         "--batch_write_mode",
         type=str,
         help="batch write mode for predictions",
         choices=["combined_csv", "separate_csv", "separate_npy"],
-        default="separate_csv"
+        default="separate_csv",
     )
 
     # model information
     parser.add_argument(
-        "--pretrained_ckpt_path",
-        type=str,
-        help="path to checkpoint",
-        required=True
+        "--pretrained_ckpt_path", type=str, help="path to checkpoint", required=True
     )
     parser.add_argument(
         "--override_encoding",
         action="store_true",
-        help="override encoding in checkpoint"
+        help="override encoding in checkpoint",
     )
 
     # the type of dataset we are running inference for
@@ -358,13 +348,11 @@ if __name__ == "__main__":
         type=str,
         help="this script supports both dms and rosetta datasets",
         choices=["dms", "rosetta"],
-        default="dms"
+        default="dms",
     )
 
     parser.add_argument(
-        "--wt",
-        action="store_true",
-        help="prediction for wild-type variant only"
+        "--wt", action="store_true", help="prediction for wild-type variant only"
     )
 
     # misc
@@ -373,13 +361,10 @@ if __name__ == "__main__":
         "--run_dir",
         type=str,
         help="run directory, prepended to output_dir, for compat with local runs",
-        default=None
+        default=None,
     )
     parser.add_argument(
-        "--log_dir_base",
-        type=str,
-        help="output directory",
-        default="output/inference"
+        "--log_dir_base", type=str, help="output directory", default="output/inference"
     )
 
     # add cluster, process, and github_tag args, which are ignored by this script
