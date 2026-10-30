@@ -1,5 +1,6 @@
 """shared utilities for training source and target models"""
 
+import math
 import os
 import warnings
 from argparse import ArgumentParser
@@ -308,7 +309,7 @@ class BestMetricLogger(Callback):
     def __init__(self, metric, mode):
         self.metric = metric
         self.state = {
-            "best": torch.tensor(np.Inf) if mode == "min" else torch.tensor(-np.Inf)
+            "best": torch.tensor(np.inf) if mode == "min" else torch.tensor(-np.inf)
         }
 
     @property
@@ -346,7 +347,7 @@ class CosineWarmupScheduler(optim.lr_scheduler.LRScheduler):
         return [base_lr * lr_factor for base_lr in self.base_lrs]
 
     def get_lr_factor(self, epoch):
-        lr_factor = 0.5 * (1 + np.cos(np.pi * epoch / self.max_num_iters))
+        lr_factor = 0.5 * (1 + math.cos(math.pi * epoch / self.max_num_iters))
         if epoch <= self.warmup:
             lr_factor *= epoch * 1.0 / self.warmup
         return lr_factor
@@ -400,7 +401,7 @@ class WarmupCosineLR(LambdaLR):
                 self.max_epochs - self.warmup_epochs - self.start_epoch
             )
             return self.final_lr + 0.5 * (1 - self.final_lr) * (
-                1 + np.cos(np.pi * progress)
+                1 + math.cos(math.pi * progress)
             )
 
 
@@ -463,7 +464,7 @@ class DualPhaseConstantWarmupCosineDecayScheduler(optim.lr_scheduler.LRScheduler
         if epoch < self.num_warmup_steps:
             return float(epoch) / self.num_warmup_steps
         elif epoch < self.phase2_start_step:
-            lr_factor = 0.5 * (1 + np.cos(np.pi * epoch / self.phase1_total_steps))
+            lr_factor = 0.5 * (1 + math.cos(math.pi * epoch / self.phase1_total_steps))
             return lr_factor
         elif epoch < self.phase2_start_step + self.num_warmup_steps:
             return (
@@ -474,8 +475,8 @@ class DualPhaseConstantWarmupCosineDecayScheduler(optim.lr_scheduler.LRScheduler
         else:
             lr_factor = 0.5 * (
                 1
-                + np.cos(
-                    np.pi
+                + math.cos(
+                    math.pi
                     * (float(epoch) - self.phase2_start_step)
                     / self.phase2_total_steps
                 )
