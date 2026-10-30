@@ -351,9 +351,11 @@ def main(args: argparse.Namespace):
         fast_dev_run=getattr(args, "fast_dev_run", False),
         limit_train_batches=getattr(args, "limit_train_batches", 1.0),
         limit_val_batches=getattr(args, "limit_val_batches", 1.0),
+        limit_test_batches=getattr(args, "limit_test_batches", 1.0),
         num_sanity_val_steps=getattr(args, "num_sanity_val_steps", 2),
         log_every_n_steps=getattr(args, "log_every_n_steps", 50),
         val_check_interval=getattr(args, "val_check_interval", 1.0),
+        enable_progress_bar=args.enable_progress_bar,
     )
 
     trainer.fit(task, datamodule=dm, ckpt_path=get_checkpoint_path(log_dir))
@@ -576,15 +578,21 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--limit_train_batches",
-        type=float,
+        type=training_utils.batch_limit,
         default=1.0,
-        help="fraction of training batches to use",
+        help="train batches to use: a fraction (float) or a count (int)",
     )
     parser.add_argument(
         "--limit_val_batches",
-        type=float,
+        type=training_utils.batch_limit,
         default=1.0,
-        help="fraction of val batches to use",
+        help="val batches to use: a fraction (float) or a count (int)",
+    )
+    parser.add_argument(
+        "--limit_test_batches",
+        type=training_utils.batch_limit,
+        default=1.0,
+        help="test batches to use: a fraction (float) or a count (int)",
     )
     parser.add_argument(
         "--num_sanity_val_steps", type=int, default=2, help="number of sanity val steps"
@@ -597,6 +605,14 @@ if __name__ == "__main__":
         type=float,
         default=1.0,
         help="how often to run validation",
+    )
+    parser.add_argument(
+        "--enable_progress_bar",
+        type=training_utils.str_to_bool,
+        nargs="?",
+        const=True,
+        default=True,
+        help="enable the progress bar (pass false to disable)",
     )
 
     # figure out which model to use

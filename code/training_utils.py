@@ -3,7 +3,7 @@
 import math
 import os
 import warnings
-from argparse import ArgumentParser
+from argparse import ArgumentParser, ArgumentTypeError
 from functools import partial
 from os.path import basename, isdir, join
 from typing import Dict, Iterator, Union
@@ -483,6 +483,26 @@ class DualPhaseConstantWarmupCosineDecayScheduler(optim.lr_scheduler.LRScheduler
             )
             lr_factor *= self.phase2_lr_ratio
             return lr_factor
+
+
+def batch_limit(value: str) -> Union[int, float]:
+    """Parse a Lightning limit_*_batches value: an int is a batch count, a float a fraction."""
+    try:
+        return int(value)
+    except ValueError:
+        return float(value)
+
+
+def str_to_bool(value: str) -> bool:
+    """Parse a boolean command-line value such as true/false, yes/no or 1/0."""
+    lowered = value.lower()
+    if lowered in ("true", "t", "yes", "y", "1"):
+        return True
+    if lowered in ("false", "f", "no", "n", "0"):
+        return False
+    raise ArgumentTypeError(
+        "expected a boolean value (true/false), got {!r}".format(value)
+    )
 
 
 def constant_warmup_helper(warmup_steps, step):
