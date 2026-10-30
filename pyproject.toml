@@ -1,0 +1,60 @@
+[project]
+name = "metl"
+version = "0.1.0"
+description = "Mutational Effect Transfer Learning: biophysics-informed protein language models."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "torch==2.9.1",
+    "torchvision==0.24.1",
+    "lightning>=2.5.2",
+    "torchmetrics>=1.7",
+    "torchinfo>=1.8",
+    "torchextractor>=0.3",
+    "fair-esm>=2.0",
+    "numpy",
+    "pandas",
+    "scipy",
+    "scikit-learn",
+    "networkx",
+    "tqdm",
+    "pyyaml",
+    "requests",
+    "rich",
+    "sqlalchemy>=2",
+    "connectorx",
+    "tables",
+    "aenum",
+    "configargparse",
+    "shortuuid",
+    "biopython",
+    "biopandas",
+    "jsonargparse[signatures]>=4.33",
+    "wandb",
+    "tensorboard",
+    "memory-profiler",
+    "matplotlib",
+    "matplotlib-label-lines",
+    "adjusttext>=0.8",
+    "seaborn",
+    "bokeh",
+    "datashader",
+    "holoviews",
+    "colorcet",
+    "umap-learn",
+    "pynndescent",
+    "jupyterlab",
+    "ipywidgets",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu130", marker = "sys_platform == 'linux'" }]
+torchvision = [{ index = "pytorch-cu130", marker = "sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
