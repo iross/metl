@@ -1,8 +1,9 @@
 """shared utilities for training source and target models"""
 
+import math
 import os
 import warnings
-from argparse import ArgumentParser
+from argparse import ArgumentParser, ArgumentTypeError
 from functools import partial
 from os.path import basename, isdir, join
 from typing import Dict, Iterator, Union
@@ -308,7 +309,7 @@ class BestMetricLogger(Callback):
     def __init__(self, metric, mode):
         self.metric = metric
         self.state = {
-            "best": torch.tensor(np.Inf) if mode == "min" else torch.tensor(-np.Inf)
+            "best": torch.tensor(np.inf) if mode == "min" else torch.tensor(-np.inf)
         }
 
     @property
@@ -346,7 +347,7 @@ class CosineWarmupScheduler(optim.lr_scheduler.LRScheduler):
         return [base_lr * lr_factor for base_lr in self.base_lrs]
 
     def get_lr_factor(self, epoch):
-        lr_factor = 0.5 * (1 + np.cos(np.pi * epoch / self.max_num_iters))
+        lr_factor = 0.5 * (1 + math.cos(math.pi * epoch / self.max_num_iters))
         if epoch <= self.warmup:
             lr_factor *= epoch * 1.0 / self.warmup
         return lr_factor
@@ -400,7 +401,7 @@ class WarmupCosineLR(LambdaLR):
                 self.max_epochs - self.warmup_epochs - self.start_epoch
             )
             return self.final_lr + 0.5 * (1 - self.final_lr) * (
-                1 + np.cos(np.pi * progress)
+                1 + math.cos(math.pi * progress)
             )
 
 
@@ -463,7 +464,7 @@ class DualPhaseConstantWarmupCosineDecayScheduler(optim.lr_scheduler.LRScheduler
         if epoch < self.num_warmup_steps:
             return float(epoch) / self.num_warmup_steps
         elif epoch < self.phase2_start_step:
-            lr_factor = 0.5 * (1 + np.cos(np.pi * epoch / self.phase1_total_steps))
+            lr_factor = 0.5 * (1 + math.cos(math.pi * epoch / self.phase1_total_steps))
             return lr_factor
         elif epoch < self.phase2_start_step + self.num_warmup_steps:
             return (
@@ -474,14 +475,34 @@ class DualPhaseConstantWarmupCosineDecayScheduler(optim.lr_scheduler.LRScheduler
         else:
             lr_factor = 0.5 * (
                 1
-                + np.cos(
-                    np.pi
+                + math.cos(
+                    math.pi
                     * (float(epoch) - self.phase2_start_step)
                     / self.phase2_total_steps
                 )
             )
             lr_factor *= self.phase2_lr_ratio
             return lr_factor
+
+
+def batch_limit(value: str) -> Union[int, float]:
+    """Parse a Lightning limit_*_batches value: an int is a batch count, a float a fraction."""
+    try:
+        return int(value)
+    except ValueError:
+        return float(value)
+
+
+def str_to_bool(value: str) -> bool:
+    """Parse a boolean command-line value such as true/false, yes/no or 1/0."""
+    lowered = value.lower()
+    if lowered in ("true", "t", "yes", "y", "1"):
+        return True
+    if lowered in ("false", "f", "no", "n", "0"):
+        return False
+    raise ArgumentTypeError(
+        "expected a boolean value (true/false), got {!r}".format(value)
+    )
 
 
 def constant_warmup_helper(warmup_steps, step):

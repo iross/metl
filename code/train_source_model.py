@@ -26,6 +26,8 @@ try:
     from .training_utils import (
         BestMetricLogger,
         CondorStopping,
+        batch_limit,
+        str_to_bool,
         create_log_dir,
         get_next_version,
         save_metrics_ptl,
@@ -38,6 +40,8 @@ except ImportError:
     from training_utils import (
         BestMetricLogger,
         CondorStopping,
+        batch_limit,
+        str_to_bool,
         create_log_dir,
         get_next_version,
         save_metrics_ptl,
@@ -373,6 +377,7 @@ def main(args):
         fast_dev_run=getattr(args, "fast_dev_run", False),
         limit_train_batches=getattr(args, "limit_train_batches", 1.0),
         limit_val_batches=getattr(args, "limit_val_batches", 1.0),
+        limit_test_batches=getattr(args, "limit_test_batches", 1.0),
         num_nodes=getattr(args, "num_nodes", 1),
         num_sanity_val_steps=getattr(args, "num_sanity_val_steps", 2),
         log_every_n_steps=getattr(args, "log_every_n_steps", 50),
@@ -408,6 +413,7 @@ def main(args):
                 strategy="auto",
                 logger=loggers,
                 default_root_dir=log_dir,
+                limit_test_batches=args.limit_test_batches,
             )
             try:
                 model = tasks.RosettaTask.load_from_checkpoint(
@@ -571,15 +577,21 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--limit_train_batches",
-        type=float,
+        type=batch_limit,
         default=1.0,
-        help="fraction of training batches to use",
+        help="train batches to use: a fraction (float) or a count (int)",
     )
     parser.add_argument(
         "--limit_val_batches",
-        type=float,
+        type=batch_limit,
         default=1.0,
-        help="fraction of val batches to use",
+        help="val batches to use: a fraction (float) or a count (int)",
+    )
+    parser.add_argument(
+        "--limit_test_batches",
+        type=batch_limit,
+        default=1.0,
+        help="test batches to use: a fraction (float) or a count (int)",
     )
     parser.add_argument(
         "--num_nodes",
@@ -601,9 +613,11 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--enable_progress_bar",
-        action="store_true",
+        type=str_to_bool,
+        nargs="?",
+        const=True,
         default=True,
-        help="enable the progress bar",
+        help="enable the progress bar (pass false to disable)",
     )
 
     # figure out which model to use

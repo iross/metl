@@ -22,16 +22,14 @@ Sam Gelman, Bryce Johnson, Chase Freschlin, Arnav Sharma, Sameer D'Costa, John P
 
 # Installation
 
-Clone this repository and install the required packages using [conda](https://docs.anaconda.com/free/miniconda/index.html) or [mamba](https://mamba.readthedocs.io/en/latest/index.html):
+Clone this repository and install the locked dependencies using [uv](https://docs.astral.sh/uv/):
 ```bash
-conda env create -f environment.yml
-conda activate metl
+uv sync --frozen
 ```
 
-Installation typically takes approximately 5 minutes. 
+This creates a `.venv` with Python 3.12. Run the commands below with `uv run` (for example, `uv run python code/train_source_model.py ...`) or activate the environment first with `source .venv/bin/activate`.
 
-For GPU support, make sure you have the appropriate CUDA version installed.
-Add `cudatoolkit` to the `environment.yml` file before creating the conda environment.
+On Linux, PyTorch is installed from the CUDA 13.0 wheel index, so GPU training needs an NVIDIA driver that supports CUDA 13.0. On macOS, the standard PyPI PyTorch build is installed.
 
 
 # Pretraining on Rosetta data
