@@ -1,0 +1,14 @@
+.git
+.github
+.claude
+.venv
+backlog
+notebooks
+output
+**/__pycache__
+**/*.py[cod]
+**/.ruff_cache
+**/.pytest_cache
+**/.DS_Store
+*.patch
+CLAUDE.md
