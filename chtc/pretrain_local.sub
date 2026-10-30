@@ -1,0 +1,31 @@
+# Pretrain a METL-Local model on CHTC.
+#   condor_submit chtc/pretrain_local.sub dataset=gb1 epochs=30 run_uuid=$(uuidgen | cut -c1-8)
+# processed-$(dataset).tar.gz must be in data_dir on the access point.
+# Point container_image at the .sif built for the commit you want to run (see chtc/README.md).
+
+universe = container
+container_image = osdf:///ospool/ap40/data/ian.ross/metl.sif
+
+executable = /workspace/metl/chtc/pretrain_local.sh
+transfer_executable = false
+arguments = $(epochs:30) $(run_uuid:$(Cluster)) $(random_seed:1) $(dataset:gb1)
+
+should_transfer_files = YES
+when_to_transfer_output = ON_EXIT_OR_EVICT
+transfer_input_files = $(data_dir:.)/processed-$(dataset:gb1).tar.gz
+transfer_output_files = output
+
+request_disk = $(disk:10GB)
+request_memory = $(memory:8GB)
+request_cpus = $(cpus:1)
+request_gpus = 1
+gpus_minimum_capability = 7.5
+gpus_minimum_memory = 8192
+
++is_resumable = true
+
+output = $(Cluster)_$(Process).out
+error = $(Cluster)_$(Process).err
+log = metl.log
+
+queue
